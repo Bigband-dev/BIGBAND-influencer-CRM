@@ -2,6 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #f8fafc;
+  color: #111827;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+select,
+textarea {
+  color: #111827;
+}
 @layer base {
   :root {
     --background: 0 0% 100%;
