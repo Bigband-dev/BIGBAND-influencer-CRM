@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import InfluencerForm from "@/components/influencer-form";
 
+export const instant = false;
+
 export default async function NewInfluencerPage() {
   const supabase = await createClient();
 

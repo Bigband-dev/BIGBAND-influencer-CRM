@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import LogoutButton from "@/components/logout-button";
+export const instant = false;
 
 export default async function HomePage() {
   const supabase = await createClient();

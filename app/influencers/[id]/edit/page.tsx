@@ -7,6 +7,8 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import InfluencerForm from "@/components/influencer-form";
 
+export const instant = false;
+
 export default async function EditInfluencerPage({
   params,
 }: {

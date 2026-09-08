@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import InfluencerTable from "@/components/influencer-table";
 import LogoutButton from "@/components/logout-button";
+export const instant = false;
 
 export default async function InfluencersPage() {
   const supabase = await createClient();

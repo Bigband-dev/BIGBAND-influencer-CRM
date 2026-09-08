@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import ExcelImport from "@/components/excel-import";
+export const instant = false;
 
 export default async function ImportPage() {
   const supabase = await createClient();

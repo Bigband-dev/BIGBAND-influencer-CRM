@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import Link from "next/link";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -93,6 +94,16 @@ export default function LoginPage() {
           </button>
 
         </form>
+        <div className="mt-6 text-center text-sm text-slate-500">
+          계정이 없으신가요?{" "}
+          <Link
+            href="/signup"
+            className="font-semibold text-slate-900 hover:underline"
+          >
+            회원가입
+          </Link>
+        </div>
+
       </div>
     </main>
   );

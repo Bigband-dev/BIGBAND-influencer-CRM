@@ -5,6 +5,7 @@ import {
   formatMan,
   formatPriceMan,
 } from "@/lib/format-number";
+export const instant = false;
 
 export default async function InfluencerDetailPage({
   params,
