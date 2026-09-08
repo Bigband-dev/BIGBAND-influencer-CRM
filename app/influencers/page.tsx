@@ -44,16 +44,11 @@ export default async function InfluencersPage() {
         {/* 상단 영역 */}
         <div className="mb-8 flex items-start justify-between">
           <div>
-            <p className="mb-1 text-sm font-medium text-slate-500">
-              Influencer Management
-            </p>
-
             <h1 className="text-3xl font-bold tracking-tight">
-              Influencer DB
+              BIGBAND 인플루언서 DB
             </h1>
-
             <p className="mt-2 text-sm text-slate-500">
-              인플루언서 검색, 이력 및 캠페인 관리를 위한 내부 DB
+              인플루언서 검색 / 이력 및 캠페인 관리 DB
             </p>
           </div>
 

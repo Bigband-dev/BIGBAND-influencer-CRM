@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 import {
   formatMan,
   formatPriceMan,
@@ -42,13 +44,20 @@ export default function InfluencerTable({
 }: {
   influencers: Influencer[];
 }) {
+  const supabase = createClient();
+  const router = useRouter();
+
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
 
   const [minFollowers, setMinFollowers] = useState("");
   const [maxFollowers, setMaxFollowers] = useState("");
-
   const [sort, setSort] = useState<SortOption>("followers_desc");
+
+  const [selectedIds, setSelectedIds] =
+    useState<string[]>([]);
+  const [deleting, setDeleting] =
+    useState(false);
 
   const categories = useMemo(() => {
     const values = influencers
@@ -132,6 +141,95 @@ export default function InfluencerTable({
     setMinFollowers("");
     setMaxFollowers("");
     setSort("followers_desc");
+  };
+  const allVisibleSelected =
+  filteredInfluencers.length > 0 &&
+  filteredInfluencers.every((item) =>
+    selectedIds.includes(item.id)
+  );
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id)
+        ? prev.filter((item) => item !== id)
+        : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    const visibleIds = filteredInfluencers.map(
+      (item) => item.id
+    );
+
+    if (allVisibleSelected) {
+      setSelectedIds((prev) =>
+        prev.filter(
+          (id) => !visibleIds.includes(id)
+        )
+      );
+    } else {
+      setSelectedIds((prev) => [
+        ...new Set([...prev, ...visibleIds]),
+      ]);
+    }
+  };
+
+  const handleDeleteOne = async (
+    id: string,
+    name: string
+  ) => {
+    const confirmed = window.confirm(
+      `${name} 인플루언서를 삭제하시겠습니까?`
+    );
+
+    if (!confirmed) return;
+
+    setDeleting(true);
+
+    const { error } = await supabase
+      .from("influencers")
+      .delete()
+      .eq("id", id);
+
+    setDeleting(false);
+
+    if (error) {
+      alert(`삭제 실패: ${error.message}`);
+      return;
+    }
+
+    setSelectedIds((prev) =>
+      prev.filter((item) => item !== id)
+    );
+
+    router.refresh();
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+
+    const confirmed = window.confirm(
+      `${selectedIds.length}명의 인플루언서를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`
+    );
+
+    if (!confirmed) return;
+
+    setDeleting(true);
+
+    const { error } = await supabase
+      .from("influencers")
+      .delete()
+      .in("id", selectedIds);
+
+    setDeleting(false);
+
+    if (error) {
+      alert(`일괄 삭제 실패: ${error.message}`);
+      return;
+    }
+
+    setSelectedIds([]);
+    router.refresh();
   };
 
   return (
@@ -257,13 +355,44 @@ export default function InfluencerTable({
           </select>
         </div>
       </section>
+      {selectedIds.length > 0 && (
+        <div className="mb-4 flex items-center justify-between rounded-xl border-2 border-red-400 bg-red-50 px-5 py-4">
+          <div>
+            <p className="font-semibold text-red-700">
+              {selectedIds.length}명 선택됨
+            </p>
 
+            <p className="mt-1 text-sm text-red-600">
+              선택한 인플루언서를 한 번에 삭제할 수 있습니다.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleBulkDelete}
+            disabled={deleting}
+            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+          >
+            {deleting
+              ? "삭제 중..."
+              : "선택 삭제"}
+          </button>
+        </div>
+      )}
       {/* 목록 */}
       <section className="overflow-hidden rounded-2xl border border-slate-500 bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[950px] text-sm">
             <thead className="border-b border-slate-700 bg-slate-100 text-slate-600">
               <tr>
+                <th className="w-12 px-4 py-3 text-center">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleSelectAll}
+                    className="h-4 w-4 cursor-pointer"
+                  />
+                </th>
                 <th className="px-4 py-3 text-left font-medium">
                   이름
                 </th>
@@ -300,6 +429,18 @@ export default function InfluencerTable({
                   key={influencer.id}
                   className="transition hover:bg-slate-100"
                 >
+                  <td className="w-12 px-4 py-4 text-center">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(
+                        influencer.id
+                      )}
+                      onChange={() =>
+                        toggleSelect(influencer.id)
+                      }
+                      className="h-4 w-4 cursor-pointer"
+                    />
+                  </td>
                   <td className="px-4 py-4">
                     <div>
                       <p className="font-semibold text-slate-900">
@@ -349,13 +490,30 @@ export default function InfluencerTable({
                     {formatPriceMan(influencer.collaboration_rate)}
                   </td>
 
-                  <td className="px-4 py-4 text-center">
-                    <Link
-                      href={`/influencers/${influencer.id}`}
-                      className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
-                    >
-                      보기
-                    </Link>
+                  <td className="px-4 py-4">
+                    <div className="flex justify-center gap-2">
+                      <Link
+                        href={`/influencers/${influencer.id}`}
+                        className="rounded-lg border-2 border-slate-400 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                      >
+                        보기
+                      </Link>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleDeleteOne(
+                            influencer.id,
+                            influencer.name ||
+                              `@${influencer.instagram_id}`
+                          )
+                        }
+                        disabled={deleting}
+                        className="rounded-lg border-2 border-red-400 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        삭제
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -363,7 +521,7 @@ export default function InfluencerTable({
               {filteredInfluencers.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-4 py-16 text-center text-slate-400"
                   >
                     조건에 맞는 인플루언서가 없습니다.

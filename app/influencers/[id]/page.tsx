@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import DeleteInfluencerButton from "@/components/delete-influencer-button";
 import {
   formatMan,
   formatPriceMan,
@@ -91,6 +92,14 @@ export default async function InfluencerDetailPage({
                 수정
               </Link>
 
+              <DeleteInfluencerButton
+                  influencerId={influencer.id}
+                  influencerName={
+                    influencer.name ||
+                    `@${influencer.instagram_id}`
+                  }
+                />
+              
               {influencer.instagram_url && (
                 <a
                   href={influencer.instagram_url}
