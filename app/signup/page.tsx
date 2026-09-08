@@ -67,12 +67,8 @@ export default function SignupPage() {
     }
 
     setMessage(
-      "회원가입이 완료되었습니다. 이메일 인증 후 로그인해주세요."
+    "인증 이메일을 발송했습니다. 이메일 인증을 완료한 뒤 로그인해주세요."
     );
-
-    setTimeout(() => {
-      router.push("/login");
-    }, 2000);
   };
 
   return (
@@ -163,10 +159,17 @@ export default function SignupPage() {
           </div>
 
           {message && (
-            <div className="rounded-lg border border-slate-300 bg-slate-50 p-3 text-sm">
-              {message}
+            <div className="rounded-lg border border-slate-300 bg-slate-50 p-4 text-sm">
+                <p>{message}</p>
+
+                <Link
+                href="/login"
+                className="mt-4 inline-block rounded-lg bg-slate-900 px-4 py-2 font-medium text-white"
+                >
+                로그인 화면으로 이동
+                </Link>
             </div>
-          )}
+            )}
 
           <button
             disabled={loading}
