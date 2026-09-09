@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import LogoutButton from "@/components/logout-button";
 export const instant = false;
+import Image from "next/image";
 
 export default async function HomePage() {
   const supabase = await createClient();
@@ -37,13 +38,8 @@ export default async function HomePage() {
       <header className="border-b-2 border-slate-400 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-8 py-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Influencer CRM
-            </p>
-
-            <h1 className="mt-1 text-xl font-bold">
-              Castbase DB
-            </h1>
+            <Image src="/logo.png" alt="Bigband logo" className="h-8 w-auto" width={64} height={64} />
+            
           </div>
 
           <div className="flex items-center gap-4">
