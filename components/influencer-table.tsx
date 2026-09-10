@@ -446,10 +446,6 @@ export default function InfluencerTable({
                       <p className="font-semibold text-slate-900">
                         {influencer.name || "-"}
                       </p>
-
-                      <p className="mt-1 text-xs text-slate-400">
-                        @{influencer.instagram_id}
-                      </p>
                     </div>
                   </td>
 

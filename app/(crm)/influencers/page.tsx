@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import InfluencerTable from "@/components/influencer-table";
 import LogoutButton from "@/components/logout-button";
+import Sidebar from "@/components/sidebar";
 export const instant = false;
 
 export default async function InfluencersPage() {
@@ -38,43 +39,38 @@ export default async function InfluencersPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto max-w-7xl px-6 py-8">
+    <div className="min-h-screen bg-slate-100 text-slate-900">
+      <div className="mx-auto max-w-7xl px-8 py-8">
 
-        {/* 상단 영역 */}
         <div className="mb-8 flex items-start justify-between">
+          {/* 상단 영역 */}
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">
-              BIGBAND 인플루언서 DB
-            </h1>
-            <p className="mt-2 text-sm text-slate-500">
-              인플루언서 검색 / 이력 및 캠페인 관리 DB
-            </p>
+            
           </div>
-
           {/* 버튼 영역 */}
           <div className="flex gap-3">
-             <Link
-                href="/influencers/import"
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700"
-              >
-                Excel 업로드
-              </Link>
+            <Link
+              href="/influencers/import"
+              className="rounded-lg border-2 border-slate-500 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Excel 업로드
+            </Link>
+
             <Link
               href="/influencers/new"
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+              className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800"
             >
               + 인플루언서 추가
             </Link>
 
             <LogoutButton />
           </div>
-        </div>
 
+        </div>
         {/* 인플루언서 목록 */}
         <InfluencerTable influencers={influencers ?? []} />
 
       </div>
-    </main>
+  </div>
   );
 }
