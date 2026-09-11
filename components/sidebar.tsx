@@ -49,6 +49,8 @@ export default function Sidebar({
       ? "block rounded-lg bg-slate-700 px-4 py-3 text-sm font-semibold text-white"
       : "block rounded-lg px-4 py-3 text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white";
 
+  const isLogs =
+  pathname.startsWith("/logs");      
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r-2 border-slate-700 bg-slate-900 text-white">
 
@@ -87,6 +89,13 @@ export default function Sidebar({
           className={customMenuClass(isSearch)}
         >
           인플루언서 서칭
+        </Link>
+
+        <Link
+          href="/logs"
+          className={customMenuClass(isLogs)}
+        >
+          사용기록
         </Link>
 
         {/* 관리자 메뉴 */}

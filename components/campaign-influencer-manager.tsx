@@ -115,6 +115,31 @@ export default function CampaignInfluencerManager({
     setSelectedIds([]);
     router.refresh();
   };
+  
+  const handleRemove = async (
+    campaignInfluencerId: string,
+    influencerName: string
+  ) => {
+    const confirmed = window.confirm(
+      `"${influencerName}" 인플루언서를 이 캠페인에서 제거하시겠습니까?`
+    );
+
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from("campaign_influencers")
+      .delete()
+      .eq("id", campaignInfluencerId);
+
+    if (error) {
+      alert(
+        `캠페인에서 제거 실패: ${error.message}`
+      );
+      return;
+    }
+
+    router.refresh();
+  };
 
   return (
     <div className="space-y-6">
@@ -151,6 +176,10 @@ export default function CampaignInfluencerManager({
 
               <th className="px-5 py-3 text-center">
                 진행 상태
+              </th>
+
+              <th className="px-5 py-3 text-center">
+                관리
               </th>
             </tr>
           </thead>
@@ -192,6 +221,22 @@ export default function CampaignInfluencerManager({
                     <td className="px-5 py-4 text-center">
                       {item.status || "candidate"}
                     </td>
+
+                    <td className="px-5 py-4 text-center">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleRemove(
+                            item.id,
+                            influencer.name ||
+                              influencer.instagram_id
+                          )
+                        }
+                        className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
+                      >
+                        제거
+                      </button>
+                    </td>
                   </tr>
                 );
               }
@@ -200,7 +245,7 @@ export default function CampaignInfluencerManager({
             {!campaignInfluencers.length && (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className="px-5 py-12 text-center text-slate-400"
                 >
                   아직 등록된 인플루언서가 없습니다.

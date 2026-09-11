@@ -26,17 +26,9 @@ export default async function ImportPage() {
         </Link>
 
         <div className="mb-8 mt-5">
-          <p className="text-sm font-medium text-slate-500">
-            Influencer Management
-          </p>
-
           <h1 className="mt-1 text-3xl font-bold">
             Excel 일괄 업로드
           </h1>
-
-          <p className="mt-2 text-sm text-slate-500">
-            기존 인플루언서 Excel 파일을 DB에 추가하거나 업데이트합니다.
-          </p>
         </div>
 
         <ExcelImport />
