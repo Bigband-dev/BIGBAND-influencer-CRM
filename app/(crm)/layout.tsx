@@ -19,9 +19,19 @@ export default async function CRMLayout({
     redirect("/login");
   }
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("name, email, role")
+    .eq("id", user.id)
+    .single();
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
-      <Sidebar />
+      <Sidebar
+        userEmail={profile?.email ?? user.email ?? ""}
+        userName={profile?.name ?? ""}
+        role={profile?.role ?? "member"}
+      />
 
       <main className="ml-64 min-h-screen">
         {children}
