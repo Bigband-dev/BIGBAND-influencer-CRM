@@ -62,6 +62,7 @@ export default async function InfluencersPage() {
             >
               + 인플루언서 추가
             </Link>
+
           </div>
 
         </div>

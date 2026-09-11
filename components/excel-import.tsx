@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
@@ -311,6 +311,9 @@ export default function ExcelImport() {
   const supabase = createClient();
   const router = useRouter();
 
+  const [selectedFile, setSelectedFile] =
+    useState<File | null>(null);
+
   const [fileName, setFileName] = useState("");
   const [rawRows, setRawRows] = useState<RawRow[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
@@ -324,7 +327,141 @@ export default function ExcelImport() {
     useState<NumberUnit>("auto");
 
   const [loading, setLoading] = useState(false);
+  const [revertingId, setRevertingId] =
+    useState<string | null>(null);
   const [message, setMessage] = useState("");
+
+  type ImportBatch = {
+    id: string;
+    file_name: string;
+    file_size: number | null;
+    uploaded_by: string | null;
+    total_rows: number | null;
+    inserted_rows: number | null;
+    updated_rows: number | null;
+    status: "processing" | "completed" | "reverted" | "failed";
+    created_at: string;
+    reverted_at: string | null;
+    reverted_by: string | null;
+    uploader_name?: string | null;
+    uploader_email?: string | null;
+  };
+
+  type BatchItem = {
+    id: string;
+    batch_id: string;
+    influencer_id: string | null;
+    instagram_id: string;
+    operation: "inserted" | "updated";
+    before_data: Record<string, unknown> | null;
+    imported_data: Record<string, unknown> | null;
+  };
+
+  const [batches, setBatches] =
+    useState<ImportBatch[]>([]);
+  const [currentUserId, setCurrentUserId] =
+    useState<string>("");
+  const [currentUserRole, setCurrentUserRole] =
+    useState<string>("member");
+  const [historyLoading, setHistoryLoading] =
+    useState(true);
+
+  const loadImportHistory = async () => {
+    setHistoryLoading(true);
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      setCurrentUserId("");
+      setCurrentUserRole("member");
+      setBatches([]);
+      setHistoryLoading(false);
+      return;
+    }
+
+    setCurrentUserId(user.id);
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    const role = profile?.role ?? "member";
+    setCurrentUserRole(role);
+
+    const { data: batchRows, error: batchError } =
+      await supabase
+        .from("import_batches")
+        .select("*")
+        .order("created_at", {
+          ascending: false,
+        })
+        .limit(50);
+
+    if (batchError) {
+      console.error(batchError);
+      setMessage(
+        `업로드 이력 조회 실패: ${batchError.message}`
+      );
+      setBatches([]);
+      setHistoryLoading(false);
+      return;
+    }
+
+    const uploaderIds = Array.from(
+      new Set(
+        (batchRows ?? [])
+          .map((batch) => batch.uploaded_by)
+          .filter(
+            (id): id is string =>
+              typeof id === "string" && id.length > 0
+          )
+      )
+    );
+
+    const profileMap = new Map<
+      string,
+      { name: string | null; email: string | null }
+    >();
+
+    if (uploaderIds.length > 0) {
+      const { data: uploaderProfiles } =
+        await supabase
+          .from("profiles")
+          .select("id, name, email")
+          .in("id", uploaderIds);
+
+      for (const uploader of uploaderProfiles ?? []) {
+        profileMap.set(uploader.id, {
+          name: uploader.name,
+          email: uploader.email,
+        });
+      }
+    }
+
+    setBatches(
+      (batchRows ?? []).map((batch) => {
+        const uploader = batch.uploaded_by
+          ? profileMap.get(batch.uploaded_by)
+          : undefined;
+
+        return {
+          ...batch,
+          uploader_name: uploader?.name ?? null,
+          uploader_email: uploader?.email ?? null,
+        } as ImportBatch;
+      })
+    );
+
+    setHistoryLoading(false);
+  };
+
+  useEffect(() => {
+    void loadImportHistory();
+  }, []);
 
   const handleFile = async (
     event: React.ChangeEvent<HTMLInputElement>
@@ -333,6 +470,7 @@ export default function ExcelImport() {
 
     if (!file) return;
 
+    setSelectedFile(file);
     setMessage("");
     setFileName(file.name);
     setRawRows([]);
@@ -508,29 +646,427 @@ export default function ExcelImport() {
       return;
     }
 
-    setLoading(true);
-    setMessage("");
-
-    const { error } = await supabase
-      .from("influencers")
-      .upsert(mappedRows, {
-        onConflict: "instagram_id",
-      });
-
-    setLoading(false);
-
-    if (error) {
+    if (!selectedFile) {
       setMessage(
-        `DB 반영 실패: ${error.message}`
+        "Excel 파일을 다시 선택해주세요."
       );
       return;
     }
 
-    setMessage(
-      `${mappedRows.length.toLocaleString()}명의 인플루언서를 DB에 반영했습니다.`
+    setLoading(true);
+    setMessage("");
+
+    let batchId: string | null = null;
+
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        throw new Error("로그인이 필요합니다.");
+      }
+
+      const { data: batch, error: batchError } =
+        await supabase
+          .from("import_batches")
+          .insert({
+            file_name: selectedFile.name,
+            file_size: selectedFile.size,
+            uploaded_by: user.id,
+            total_rows: mappedRows.length,
+            inserted_rows: 0,
+            updated_rows: 0,
+            status: "processing",
+          })
+          .select("id")
+          .single();
+
+      if (batchError || !batch) {
+        throw new Error(
+          batchError?.message ??
+            "업로드 기록을 생성하지 못했습니다."
+        );
+      }
+
+      batchId = batch.id;
+
+      const instagramIds = Array.from(
+        new Set(
+          mappedRows.map(
+            (row) => row.instagram_id
+          )
+        )
+      );
+
+      const { data: existingInfluencers, error: existingError } =
+        await supabase
+          .from("influencers")
+          .select("*")
+          .in("instagram_id", instagramIds);
+
+      if (existingError) {
+        throw new Error(existingError.message);
+      }
+
+      const existingMap = new Map<
+        string,
+        Record<string, unknown>
+      >(
+        (existingInfluencers ?? []).map(
+          (item) => [
+            item.instagram_id as string,
+            item as Record<string, unknown>,
+          ]
+        )
+      );
+
+      const insertedCount = mappedRows.filter(
+        (row) =>
+          !existingMap.has(row.instagram_id)
+      ).length;
+
+      const updatedCount =
+        mappedRows.length - insertedCount;
+
+      const { data: savedInfluencers, error: upsertError } =
+        await supabase
+          .from("influencers")
+          .upsert(mappedRows, {
+            onConflict: "instagram_id",
+          })
+          .select("*");
+
+      if (upsertError) {
+        throw new Error(upsertError.message);
+      }
+
+      const savedMap = new Map<
+        string,
+        Record<string, unknown>
+      >(
+        (savedInfluencers ?? []).map(
+          (item) => [
+            item.instagram_id as string,
+            item as Record<string, unknown>,
+          ]
+        )
+      );
+
+      const batchItems = mappedRows.map(
+        (row) => {
+          const existing =
+            existingMap.get(row.instagram_id);
+
+          const saved =
+            savedMap.get(row.instagram_id);
+
+          return {
+            batch_id: batchId,
+            influencer_id:
+              typeof saved?.id === "string"
+                ? saved.id
+                : null,
+            instagram_id: row.instagram_id,
+            operation: existing
+              ? "updated"
+              : "inserted",
+            before_data: existing ?? null,
+            imported_data: row,
+          };
+        }
+      );
+
+      const { error: itemError } =
+        await supabase
+          .from("import_batch_items")
+          .insert(batchItems);
+
+      if (itemError) {
+        throw new Error(
+          `업로드 내역 저장 실패: ${itemError.message}`
+        );
+      }
+
+      const { error: completeError } =
+        await supabase
+          .from("import_batches")
+          .update({
+            status: "completed",
+            inserted_rows: insertedCount,
+            updated_rows: updatedCount,
+          })
+          .eq("id", batchId);
+
+      if (completeError) {
+        throw new Error(
+          `업로드 완료 상태 저장 실패: ${completeError.message}`
+        );
+      }
+
+      setMessage(
+        `${mappedRows.length.toLocaleString()}명의 인플루언서를 DB에 반영했습니다. 신규 ${insertedCount.toLocaleString()}명, 기존 업데이트 ${updatedCount.toLocaleString()}명입니다.`
+      );
+
+      await loadImportHistory();
+      router.refresh();
+    } catch (error) {
+      console.error(error);
+
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "DB 반영 중 오류가 발생했습니다.";
+
+      if (batchId) {
+        await supabase
+          .from("import_batches")
+          .update({
+            status: "failed",
+          })
+          .eq("id", batchId);
+      }
+
+      setMessage(
+        `DB 반영 실패: ${errorMessage}`
+      );
+
+      await loadImportHistory();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const canRevertBatch = (
+    batch: ImportBatch
+  ) => {
+    return (
+      currentUserRole === "owner" ||
+      currentUserRole === "admin" ||
+      batch.uploaded_by === currentUserId
+    );
+  };
+
+  const handleRevert = async (
+    batch: ImportBatch
+  ) => {
+    if (batch.status !== "completed") {
+      return;
+    }
+
+    if (!canRevertBatch(batch)) {
+      setMessage(
+        "이 업로드를 되돌릴 권한이 없습니다."
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `${batch.file_name} 업로드를 되돌리시겠습니까?\n\n신규 등록된 인플루언서는 삭제되고, 기존 인플루언서는 업로드 이전 값으로 복원됩니다.\n\n캠페인에 연결된 신규 인플루언서가 있다면 관련 데이터에도 영향을 줄 수 있습니다.`
     );
 
-    router.refresh();
+    if (!confirmed) return;
+
+    setRevertingId(batch.id);
+    setMessage("");
+
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        throw new Error("로그인이 필요합니다.");
+      }
+
+      const { data: profile } =
+        await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .single();
+
+      const role = profile?.role ?? "member";
+
+      const allowed =
+        role === "owner" ||
+        role === "admin" ||
+        batch.uploaded_by === user.id;
+
+      if (!allowed) {
+        throw new Error(
+          "이 업로드를 되돌릴 권한이 없습니다."
+        );
+      }
+
+      const { data: items, error: itemError } =
+        await supabase
+          .from("import_batch_items")
+          .select("*")
+          .eq("batch_id", batch.id)
+          .order("created_at", {
+            ascending: false,
+          });
+
+      if (itemError) {
+        throw new Error(itemError.message);
+      }
+
+      if (!items || items.length === 0) {
+        throw new Error(
+          "이 업로드에 연결된 상세 기록이 없습니다."
+        );
+      }
+
+      const insertedItems = (
+        items as BatchItem[]
+      ).filter(
+        (item) => item.operation === "inserted"
+      );
+
+      const updatedItems = (
+        items as BatchItem[]
+      ).filter(
+        (item) => item.operation === "updated"
+      );
+
+      // 기존 인플루언서는 업로드 직전 값으로 복원
+      for (const item of updatedItems) {
+        if (
+          !item.influencer_id ||
+          !item.before_data
+        ) {
+          continue;
+        }
+
+        const restoreData = {
+          ...item.before_data,
+        };
+
+        delete restoreData.id;
+        delete restoreData.created_at;
+        delete restoreData.updated_at;
+
+        const { error: restoreError } =
+          await supabase
+            .from("influencers")
+            .update(restoreData)
+            .eq("id", item.influencer_id);
+
+        if (restoreError) {
+          throw new Error(
+            `@${item.instagram_id} 복원 실패: ${restoreError.message}`
+          );
+        }
+      }
+
+      // 해당 Excel 업로드에서 새로 생긴 인플루언서는 삭제
+      for (const item of insertedItems) {
+        let deleteQuery = supabase
+          .from("influencers")
+          .delete();
+
+        if (item.influencer_id) {
+          deleteQuery = deleteQuery.eq(
+            "id",
+            item.influencer_id
+          );
+        } else {
+          deleteQuery = deleteQuery.eq(
+            "instagram_id",
+            item.instagram_id
+          );
+        }
+
+        const { error: deleteError } =
+          await deleteQuery;
+
+        if (deleteError) {
+          throw new Error(
+            `@${item.instagram_id} 삭제 실패: ${deleteError.message}`
+          );
+        }
+      }
+
+      const { error: batchUpdateError } =
+        await supabase
+          .from("import_batches")
+          .update({
+            status: "reverted",
+            reverted_at:
+              new Date().toISOString(),
+            reverted_by: user.id,
+          })
+          .eq("id", batch.id)
+          .eq("status", "completed");
+
+      if (batchUpdateError) {
+        throw new Error(
+          `Revert 상태 저장 실패: ${batchUpdateError.message}`
+        );
+      }
+
+      setMessage(
+        `${batch.file_name} 업로드를 되돌렸습니다. 신규 ${insertedItems.length.toLocaleString()}명 삭제, 기존 ${updatedItems.length.toLocaleString()}명 복원을 시도했습니다.`
+      );
+
+      await loadImportHistory();
+      router.refresh();
+    } catch (error) {
+      console.error(error);
+
+      setMessage(
+        error instanceof Error
+          ? `Revert 실패: ${error.message}`
+          : "Revert 중 오류가 발생했습니다."
+      );
+    } finally {
+      setRevertingId(null);
+    }
+  };
+
+  const formatDateTime = (
+    value: string | null
+  ) => {
+    if (!value) return "-";
+
+    return new Date(value).toLocaleString(
+      "ko-KR"
+    );
+  };
+
+  const formatFileSize = (
+    size: number | null
+  ) => {
+    if (size === null) return "-";
+
+    if (size < 1024) {
+      return `${size} B`;
+    }
+
+    if (size < 1024 * 1024) {
+      return `${(size / 1024).toFixed(1)} KB`;
+    }
+
+    return `${(
+      size /
+      (1024 * 1024)
+    ).toFixed(1)} MB`;
+  };
+
+  const statusLabel = (
+    status: ImportBatch["status"]
+  ) => {
+    const labels = {
+      processing: "처리 중",
+      completed: "완료",
+      reverted: "되돌림",
+      failed: "실패",
+    };
+
+    return labels[status];
   };
 
   return (
@@ -617,6 +1153,7 @@ export default function ExcelImport() {
                 </div>
               ))}
             </div>
+
             <div className="mt-6 border-t border-slate-200 pt-5">
               <h3 className="text-sm font-semibold text-slate-900">
                 팔로워 / 조회수 단위
@@ -815,7 +1352,7 @@ export default function ExcelImport() {
               </p>
 
               <p className="mt-1 text-sm text-slate-500">
-                기존 Instagram ID가 있으면 해당 인플루언서 정보를 업데이트합니다.
+                기존 Instagram ID가 있으면 해당 인플루언서 정보를 업데이트하며, 업로드 이력이 저장되어 나중에 되돌릴 수 있습니다.
               </p>
             </div>
 
@@ -841,6 +1378,198 @@ export default function ExcelImport() {
           {message}
         </div>
       )}
+
+      <section className="overflow-hidden rounded-xl border border-slate-300 bg-white">
+        <div className="flex items-center justify-between border-b border-slate-300 px-6 py-5">
+          <div>
+            <h2 className="text-lg font-semibold">
+              최근 Excel 업로드
+            </h2>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Member는 본인이 올린 파일을 되돌릴 수 있고, Admin / Owner는 모든 업로드를 되돌릴 수 있습니다.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              void loadImportHistory()
+            }
+            disabled={historyLoading}
+            className="rounded-lg border border-slate-400 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-40"
+          >
+            새로고침
+          </button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1050px] text-sm">
+            <thead className="border-b-2 border-slate-400 bg-slate-100">
+              <tr>
+                <th className="px-4 py-3 text-left">
+                  파일명
+                </th>
+                <th className="px-4 py-3 text-left">
+                  업로드자
+                </th>
+                <th className="px-4 py-3 text-right">
+                  전체
+                </th>
+                <th className="px-4 py-3 text-right">
+                  신규
+                </th>
+                <th className="px-4 py-3 text-right">
+                  수정
+                </th>
+                <th className="px-4 py-3 text-left">
+                  상태
+                </th>
+                <th className="px-4 py-3 text-left">
+                  업로드 시간
+                </th>
+                <th className="px-4 py-3 text-left">
+                  작업
+                </th>
+              </tr>
+            </thead>
+
+            <tbody className="divide-y divide-slate-200">
+              {historyLoading ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="px-4 py-10 text-center text-slate-500"
+                  >
+                    업로드 이력을 불러오는 중입니다.
+                  </td>
+                </tr>
+              ) : batches.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="px-4 py-10 text-center text-slate-500"
+                  >
+                    아직 Excel 업로드 이력이 없습니다.
+                  </td>
+                </tr>
+              ) : (
+                batches.map((batch) => {
+                  const canRevert =
+                    canRevertBatch(batch);
+
+                  return (
+                    <tr
+                      key={batch.id}
+                      className="hover:bg-slate-50"
+                    >
+                      <td className="px-4 py-4">
+                        <div className="font-medium text-slate-900">
+                          {batch.file_name}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {formatFileSize(
+                            batch.file_size
+                          )}
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <div>
+                          {batch.uploader_name ||
+                            batch.uploader_email ||
+                            "-"}
+                        </div>
+
+                        {batch.uploader_name &&
+                          batch.uploader_email && (
+                            <div className="mt-1 text-xs text-slate-500">
+                              {batch.uploader_email}
+                            </div>
+                          )}
+                      </td>
+
+                      <td className="px-4 py-4 text-right">
+                        {(
+                          batch.total_rows ?? 0
+                        ).toLocaleString()}
+                      </td>
+
+                      <td className="px-4 py-4 text-right">
+                        {(
+                          batch.inserted_rows ?? 0
+                        ).toLocaleString()}
+                      </td>
+
+                      <td className="px-4 py-4 text-right">
+                        {(
+                          batch.updated_rows ?? 0
+                        ).toLocaleString()}
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <span className="inline-flex rounded-full border border-slate-300 bg-slate-100 px-2.5 py-1 text-xs font-semibold">
+                          {statusLabel(
+                            batch.status
+                          )}
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-4 text-slate-600">
+                        {formatDateTime(
+                          batch.created_at
+                        )}
+                      </td>
+
+                      <td className="px-4 py-4">
+                        {batch.status ===
+                          "completed" &&
+                        canRevert ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              void handleRevert(
+                                batch
+                              )
+                            }
+                            disabled={
+                              revertingId ===
+                              batch.id
+                            }
+                            className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-40"
+                          >
+                            {revertingId ===
+                            batch.id
+                              ? "되돌리는 중..."
+                              : "되돌리기"}
+                          </button>
+                        ) : batch.status ===
+                          "reverted" ? (
+                          <div className="text-xs text-slate-500">
+                            {formatDateTime(
+                              batch.reverted_at
+                            )}
+                          </div>
+                        ) : batch.status ===
+                            "completed" &&
+                          !canRevert ? (
+                          <span className="text-xs text-slate-400">
+                            다른 사용자의 업로드
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400">
+                            -
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }

@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import Link from "next/link";
+import DeleteCampaignButton from "@/components/delete-campaign-button";
 
 import CampaignInfluencerManager
   from "@/components/campaign-influencer-manager";
@@ -66,21 +68,34 @@ export default async function CampaignDetailPage({
 
   return (
     <div className="mx-auto max-w-7xl px-8 py-8">
-      <div className="mb-8">
-        <p className="text-sm font-medium text-slate-500">
-          Campaign
-        </p>
+      <div className="mb-8 flex items-start justify-between">
+        <div>
+          <h1 className="mt-1 text-3xl font-bold">
+            {campaign.name}
+          </h1>
 
-        <h1 className="mt-1 text-3xl font-bold">
-          {campaign.name}
-        </h1>
+          <p className="mt-2 text-slate-500">
+            {"광고주 : " + (campaign.brand || "-")}
 
-        <p className="mt-2 text-slate-500">
-          {campaign.brand || "-"}
-          {campaign.product
-            ? ` · ${campaign.product}`
-            : ""}
-        </p>
+            {campaign.product
+              ? ` / 제품 : ${campaign.product}`
+              : ""}
+          </p>
+        </div>
+
+        <div className="flex gap-3">
+          <Link
+            href={`/campaigns/${campaign.id}/edit`}
+            className="rounded-lg border-2 border-slate-400 bg-white px-4 py-2.5 text-sm font-semibold hover:bg-slate-50"
+          >
+            수정
+          </Link>
+
+          <DeleteCampaignButton
+            campaignId={campaign.id}
+            campaignName={campaign.name}
+          />
+        </div>
       </div>
 
       <section className="mb-6 grid gap-4 md:grid-cols-4">
@@ -94,15 +109,7 @@ export default async function CampaignDetailPage({
           value={campaign.start_date || "-"}
         />
 
-        <InfoCard
-          label="종료일"
-          value={campaign.end_date || "-"}
-        />
-
-        <InfoCard
-          label="등록 인플루언서"
-          value={`${campaignInfluencers?.length ?? 0}명`}
-        />
+        {/* 나머지 InfoCard */}
       </section>
 
       <CampaignInfluencerManager
