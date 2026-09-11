@@ -98,18 +98,67 @@ export default async function CampaignDetailPage({
         </div>
       </div>
 
-      <section className="mb-6 grid gap-4 md:grid-cols-4">
-        <InfoCard
-          label="상태"
-          value={campaign.status}
-        />
+      <section className="mb-6 rounded-xl border-2 border-slate-400 bg-white p-6">
+        <h2 className="mb-5 text-lg font-bold">
+          캠페인 정보
+        </h2>
 
-        <InfoCard
-          label="시작일"
-          value={campaign.start_date || "-"}
-        />
+        <div className="grid gap-6 md:grid-cols-2">
+          <div>
+            <p className="text-sm font-medium text-slate-500">
+              캠페인 목적
+            </p>
 
-        {/* 나머지 InfoCard */}
+            <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-900">
+              {campaign.purpose || "-"}
+            </p>
+          </div>
+
+          <div>
+            <p className="text-sm font-medium text-slate-500">
+              캠페인 예산
+            </p>
+
+            <p className="mt-2 text-lg font-bold">
+              {campaign.budget !== null
+                ? `${campaign.budget.toLocaleString()}만원`
+                : "-"}
+            </p>
+          </div>
+
+          <div>
+            <p className="text-sm font-medium text-slate-500">
+              진행 플랫폼
+            </p>
+
+            <div className="mt-2 flex flex-wrap gap-2">
+              {campaign.platforms?.length ? (
+                campaign.platforms.map(
+                  (platform: string) => (
+                    <span
+                      key={platform}
+                      className="rounded-full border border-slate-300 bg-slate-100 px-3 py-1 text-sm font-medium"
+                    >
+                      {platform}
+                    </span>
+                  )
+                )
+              ) : (
+                <span>-</span>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-sm font-medium text-slate-500">
+              캠페인 설명
+            </p>
+
+            <p className="mt-2 whitespace-pre-line text-sm leading-6">
+              {campaign.description || "-"}
+            </p>
+          </div>
+        </div>
       </section>
 
       <CampaignInfluencerManager

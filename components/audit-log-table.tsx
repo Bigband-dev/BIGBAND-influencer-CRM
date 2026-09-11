@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 
 type AuditLog = {
   id: string;
@@ -288,15 +288,13 @@ export default function AuditLogTable({
                     log.id;
 
                   return (
-                    <>
+                    <Fragment key={log.id}>
                       <tr
-                        key={log.id}
                         onClick={() =>
-                          setExpandedId(
-                            expanded
+                            setExpandedId(expanded
                               ? null
                               : log.id
-                          )
+                            )
                         }
                         className="cursor-pointer hover:bg-slate-50"
                       >
@@ -345,9 +343,7 @@ export default function AuditLogTable({
                       </tr>
 
                       {expanded && (
-                        <tr
-                          key={`${log.id}-detail`}
-                        >
+                        <tr>
                           <td
                             colSpan={5}
                             className="bg-slate-50 px-6 py-5"
@@ -358,7 +354,7 @@ export default function AuditLogTable({
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   );
                 }
               )}

@@ -13,6 +13,9 @@ type Campaign = {
   start_date: string | null;
   end_date: string | null;
   status: string | null;
+  purpose: string | null;
+  platforms: string[] | null;
+  budget: number | null;
 };
 
 export default function CampaignEditForm({
@@ -44,11 +47,46 @@ export default function CampaignEditForm({
   const [status, setStatus] =
     useState(campaign.status ?? "planning");
 
+  const [purpose, setPurpose] =
+  useState(campaign.purpose ?? "");
+
+  const [platforms, setPlatforms] =
+    useState<string[]>(campaign.platforms ?? []);
+
+  const [budget, setBudget] =
+    useState(
+      campaign.budget !== null
+        ? String(campaign.budget)
+        : ""
+    );
+
   const [loading, setLoading] =
     useState(false);
 
   const [message, setMessage] =
     useState("");
+
+  const PLATFORM_OPTIONS = [
+    "Instagram",
+    "YouTube",
+    "TikTok",
+    "Blog",
+    "Threads",
+    "기타",
+  ];
+
+  const togglePlatform = (
+    platform: string
+  ) => {
+    setPlatforms((prev) =>
+      prev.includes(platform)
+        ? prev.filter(
+            (item) =>
+              item !== platform
+          )
+        : [...prev, platform]
+    );
+  };
 
   const handleSubmit = async (
     e: React.FormEvent
@@ -78,6 +116,11 @@ export default function CampaignEditForm({
         end_date:
           endDate || null,
         status,
+        purpose: purpose.trim() || null,
+        platforms,
+        budget: budget
+          ? Number(budget.replace(/,/g, ""))
+          : null,
       })
       .eq("id", campaign.id);
 
@@ -166,10 +209,85 @@ export default function CampaignEditForm({
             onChange={setEndDate}
           />
         </div>
+        <div>
+          <label className="mb-2 block text-sm font-medium">
+            캠페인 예산
+          </label>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              value={budget}
+              onChange={(e) =>
+                setBudget(
+                  e.target.value
+                )
+              }
+              placeholder="예: 3000"
+              className="w-full rounded-lg border-2 border-slate-300 bg-white px-3 py-2.5"
+            />
+
+            <span className="whitespace-nowrap text-sm text-slate-500">
+              만원
+            </span>
+          </div>
+        </div>
+        <div className="mt-5">
+          <label className="mb-3 block text-sm font-medium">
+            진행 플랫폼
+          </label>
+
+          <div className="flex flex-wrap gap-2">
+            {PLATFORM_OPTIONS.map(
+              (platform) => {
+                const selected =
+                  platforms.includes(
+                    platform
+                  );
+
+                return (
+                  <button
+                    key={platform}
+                    type="button"
+                    onClick={() =>
+                      togglePlatform(
+                        platform
+                      )
+                    }
+                    className={
+                      selected
+                        ? "rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+                        : "rounded-lg border border-slate-400 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                    }
+                  >
+                    {platform}
+                  </button>
+                );
+              }
+            )}
+          </div>
+        </div>
+        <div className="mt-5">
+          <label className="mb-2 block text-sm font-medium">
+            캠페인 목적
+          </label>
+
+          <textarea
+            value={purpose}
+            onChange={(e) =>
+              setPurpose(
+                e.target.value
+              )
+            }
+            rows={3}
+            placeholder="예: 신제품 인지도 확대 및 체험 콘텐츠 확보"
+            className="w-full rounded-lg border-2 border-slate-300 bg-white px-4 py-3"
+          />
+        </div>
 
         <div className="mt-5">
           <label className="mb-2 block text-sm font-medium">
-            캠페인 설명
+            메모
           </label>
 
           <textarea

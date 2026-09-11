@@ -9,10 +9,20 @@ type Campaign = {
   brand: string | null;
   product: string | null;
   description: string | null;
+
+  purpose: string | null;
+  platforms: string[] | null;
+  budget: number | null;
+
   start_date: string | null;
   end_date: string | null;
   status: string | null;
   created_at: string | null;
+
+  campaign_influencers?: {
+    id: string;
+    status: string | null;
+  }[];
 };
 
 export default function CampaignTable({
@@ -156,16 +166,36 @@ export default function CampaignTable({
               <th className="px-5 py-4 text-center">
                 상태
               </th>
+
+              <th className="px-5 py-4 text-right">
+                예산
+              </th>
+
+              <th className="px-5 py-4 text-center">
+                후보
+              </th>
+
+              <th className="px-5 py-4 text-center">
+                확정
+              </th>
             </tr>
           </thead>
 
           <tbody className="divide-y divide-slate-300">
-            {filteredCampaigns.map(
-              (campaign) => (
-                <tr
-                  key={campaign.id}
-                  onClick={() =>
-                    router.push(`/campaigns/${campaign.id}`)
+            {filteredCampaigns.map((campaign) => {
+                const candidateCount =
+                  campaign.campaign_influencers?.length ?? 0;
+                  
+                const confirmedCount = 
+                  campaign.campaign_influencers?.filter(
+                    (influencer) => influencer.status === "confirmed"
+                  ).length ?? 0;
+
+                return (
+                  <tr
+                    key={campaign.id}
+                    onClick={() =>
+                      router.push(`/campaigns/${campaign.id}`)
                   }
                   className="cursor-pointer transition hover:bg-slate-100"
                 >
@@ -192,9 +222,23 @@ export default function CampaignTable({
                       status={campaign.status}
                     />
                   </td>
+
+                  <td className="px-5 py-4 text-right">
+                    {campaign.budget !== null 
+                      ? `${campaign.budget.toLocaleString()}만원` 
+                      : "-"}
+                  </td>
+
+                  <td className="px-5 py-4 text-center">
+                    {candidateCount}명
+                  </td>
+
+                  <td className="px-5 py-4 text-center">
+                    {confirmedCount}명
+                  </td>
                 </tr>
               )
-            )}
+            })}
 
             {filteredCampaigns.length === 0 && (
               <tr>

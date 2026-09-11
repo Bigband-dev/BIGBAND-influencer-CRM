@@ -9,9 +9,16 @@ export default async function CampaignsPage() {
 
   const { data: campaigns, error } = await supabase
     .from("campaigns")
-    .select("*")
-    .order("created_at", { ascending: false });
-
+    .select(`
+      *,
+      campaign_influencers (
+        id,
+        status
+      )
+    `)
+    .order("created_at", {
+      ascending: false,
+    });
   if (error) {
     return (
       <div className="mx-auto max-w-7xl px-8 py-8">
