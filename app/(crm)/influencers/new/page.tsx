@@ -27,10 +27,6 @@ export default async function NewInfluencerPage() {
         </Link>
 
         <div className="mb-8 mt-5">
-          <p className="text-sm font-medium text-slate-500">
-            Influencer Management
-          </p>
-
           <h1 className="mt-1 text-3xl font-bold">
             인플루언서 추가
           </h1>

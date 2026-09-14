@@ -427,6 +427,10 @@ export default function InfluencerTable({
               {filteredInfluencers.map((influencer) => (
                 <tr
                   key={influencer.id}
+                  onClick={() =>
+                    router.push(`/influencers/${influencer.id}`
+                    )
+                  }
                   className="transition hover:bg-slate-100"
                 >
                   <td className="w-12 px-4 py-4 text-center">
@@ -435,6 +439,7 @@ export default function InfluencerTable({
                       checked={selectedIds.includes(
                         influencer.id
                       )}
+                      onClick={(e) => e.stopPropagation()}
                       onChange={() =>
                         toggleSelect(influencer.id)
                       }
@@ -488,22 +493,19 @@ export default function InfluencerTable({
 
                   <td className="px-4 py-4">
                     <div className="flex justify-center gap-2">
-                      <Link
-                        href={`/influencers/${influencer.id}`}
-                        className="rounded-lg border-2 border-slate-400 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                      >
-                        보기
-                      </Link>
+                      
 
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={(e) => {
+                          e.stopPropagation();
+
                           handleDeleteOne(
                             influencer.id,
                             influencer.name ||
                               `@${influencer.instagram_id}`
-                          )
-                        }
+                          );
+                        }}
                         disabled={deleting}
                         className="rounded-lg border-2 border-red-400 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
                       >
@@ -517,7 +519,7 @@ export default function InfluencerTable({
               {filteredInfluencers.length === 0 && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={7}
                     className="px-4 py-16 text-center text-slate-400"
                   >
                     조건에 맞는 인플루언서가 없습니다.

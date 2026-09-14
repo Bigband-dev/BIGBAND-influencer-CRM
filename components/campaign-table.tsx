@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { formatPriceMan } from "@/lib/format-number";
 
 type Campaign = {
   id: string;
@@ -224,9 +225,7 @@ export default function CampaignTable({
                   </td>
 
                   <td className="px-5 py-4 text-right">
-                    {campaign.budget !== null 
-                      ? `${campaign.budget.toLocaleString()}만원` 
-                      : "-"}
+                    {formatPriceMan(campaign.budget)}
                   </td>
 
                   <td className="px-5 py-4 text-center">
@@ -262,19 +261,58 @@ function StatusBadge({
 }: {
   status: string | null;
 }) {
-  const labels: Record<string, string> = {
-    planning: "준비 중",
-    ongoing: "진행 중",
-    in_progress: "진행 중",
-    completed: "진행 완료",
-    cancelled: "취소",
+  const config: Record<
+    string,
+    {
+      label: string;
+      className: string;
+    }
+  > = {
+    planning: {
+      label: "준비 중",
+      className:
+        "border-amber-300 bg-amber-50 text-amber-700",
+    },
+
+    ongoing: {
+      label: "진행 중",
+      className:
+        "border-blue-300 bg-blue-50 text-blue-700",
+    },
+
+    in_progress: {
+      label: "진행 중",
+      className:
+        "border-blue-300 bg-blue-50 text-blue-700",
+    },
+
+    completed: {
+      label: "진행 완료",
+      className:
+        "border-emerald-300 bg-emerald-50 text-emerald-700",
+    },
+
+    cancelled: {
+      label: "진행 중단",
+      className:
+        "border-red-300 bg-red-50 text-red-700",
+    },
   };
 
+  const current =
+    status && config[status]
+      ? config[status]
+      : {
+          label: status || "-",
+          className:
+            "border-slate-300 bg-slate-100 text-slate-600",
+        };
+
   return (
-    <span className="inline-flex rounded-full border border-slate-400 bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-      {status
-        ? labels[status] || status
-        : "-"}
+    <span
+      className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${current.className}`}
+    >
+      {current.label}
     </span>
   );
 }

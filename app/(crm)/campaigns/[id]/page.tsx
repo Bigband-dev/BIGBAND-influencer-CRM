@@ -5,6 +5,7 @@ import DeleteCampaignButton from "@/components/delete-campaign-button";
 
 import CampaignInfluencerManager
   from "@/components/campaign-influencer-manager";
+import { formatPriceMan } from "@/lib/format-number";
 
 export const instant = false;
 
@@ -120,9 +121,7 @@ export default async function CampaignDetailPage({
             </p>
 
             <p className="mt-2 text-lg font-bold">
-              {campaign.budget !== null
-                ? `${campaign.budget.toLocaleString()}만원`
-                : "-"}
+              {formatPriceMan(campaign.budget)}
             </p>
           </div>
 
@@ -151,7 +150,7 @@ export default async function CampaignDetailPage({
 
           <div>
             <p className="text-sm font-medium text-slate-500">
-              캠페인 설명
+              메모
             </p>
 
             <p className="mt-2 whitespace-pre-line text-sm leading-6">

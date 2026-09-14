@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { formatPriceMan } from "@/lib/format-number";
 
 type Campaign = {
   id: string;
@@ -55,9 +56,7 @@ export default function CampaignEditForm({
 
   const [budget, setBudget] =
     useState(
-      campaign.budget !== null
-        ? String(campaign.budget)
-        : ""
+      formatPriceMan(campaign.budget)
     );
 
   const [loading, setLoading] =

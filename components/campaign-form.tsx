@@ -139,7 +139,7 @@ export default function CampaignForm() {
               </option>
 
               <option value="cancelled">
-                취소
+                진행 중단
               </option>
             </select>
           </div>
