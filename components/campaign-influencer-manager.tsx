@@ -229,18 +229,29 @@ export default function CampaignInfluencerManager({
               현재 캠페인에 등록된 인플루언서입니다.
             </p>
           </div>
-
           {selectedCampaignIds.length > 0 && (
-            <button
-              type="button"
-              onClick={handleBulkRemove}
-              disabled={removing}
-              className="rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {removing
-                ? "제거 중..."
-                : `선택 ${selectedCampaignIds.length}명 제거`}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedCampaignIds([])
+                }
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                선택 해제
+              </button>
+
+              <button
+                type="button"
+                onClick={handleBulkRemove}
+                disabled={removing}
+                className="rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {removing
+                  ? "제거 중..."
+                  : `선택 ${selectedCampaignIds.length}명 제거`}
+              </button>
+            </div>
           )}
         </div>
 

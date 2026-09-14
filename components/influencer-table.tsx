@@ -367,16 +367,26 @@ export default function InfluencerTable({
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={handleBulkDelete}
-            disabled={deleting}
-            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-          >
-            {deleting
-              ? "삭제 중..."
-              : "선택 삭제"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedIds([])}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              선택 해제
+            </button>
+
+            <button
+              type="button"
+              onClick={handleBulkDelete}
+              disabled={deleting}
+              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              {deleting
+                ? "삭제 중..."
+                : "선택 삭제"}
+            </button>
+          </div>
         </div>
       )}
       {/* 목록 */}
