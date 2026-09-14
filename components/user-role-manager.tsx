@@ -90,7 +90,7 @@ export default function UserRoleManager({
               <td className="px-5 py-4">
                 {user.role === "owner" ? (
                   <span className="text-xs font-semibold text-slate-500">
-                    Owner 보호
+                    Owner
                   </span>
                 ) : (
                   <select

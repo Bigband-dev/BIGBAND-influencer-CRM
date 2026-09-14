@@ -70,6 +70,61 @@ export default async function InfluencerDetailPage({
         ascending: false,
       });
 
+  const { data: influencerLogsRaw } = await supabase
+    .from("audit_logs")
+    .select(`
+      id,
+      actor_id,
+      action,
+      old_data,
+      new_data,
+      created_at
+    `)
+    .eq("table_name", "influencers")
+    .eq("record_id", id)
+    .in("action", ["INSERT", "UPDATE", "DELETE"])
+    .order("created_at", {
+      ascending: false,
+    })
+    .limit(10);
+  const actorIds = [
+    ...new Set(
+      (influencerLogsRaw ?? [])
+        .map((log) => log.actor_id)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+
+  const { data: actors } =
+    actorIds.length > 0
+      ? await supabase
+          .from("profiles")
+          .select("id, name, email")
+          .in("id", actorIds)
+      : { data: [] };
+
+  const actorMap = new Map(
+    (actors ?? []).map((actor) => [
+      actor.id,
+      actor,
+    ])
+  );
+
+  const influencerLogs = (
+    influencerLogsRaw ?? []
+  ).map((log) => {
+    const actor = log.actor_id
+      ? actorMap.get(log.actor_id)
+      : null;
+
+    return {
+      ...log,
+      actor_name:
+        actor?.name ?? null,
+      actor_email:
+        actor?.email ?? null,
+    };
+  });
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
       <div className="mx-auto max-w-6xl px-6 py-8">
@@ -297,6 +352,108 @@ export default async function InfluencerDetailPage({
               )}
             </div>
           )}
+          
+        </section>
+
+        <section className="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <details>
+            <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-5 hover:bg-slate-50">
+              <div>
+                <h2 className="text-lg font-semibold">
+                  변경 이력
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  이 인플루언서의 최근 등록 / 수정 기록
+                </p>
+              </div>
+
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                최근 {influencerLogs.length}건
+              </span>
+            </summary>
+
+            <div className="border-t border-slate-200">
+              {influencerLogs.length === 0 ? (
+                <div className="px-6 py-8 text-center text-sm text-slate-400">
+                  변경 이력이 없습니다.
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {influencerLogs.map((log) => (
+                    <div
+                      key={log.id}
+                      className="flex items-center justify-between gap-6 px-6 py-4"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span
+                          className={`inline-flex shrink-0 rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                            log.action === "INSERT"
+                              ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                              : log.action === "UPDATE"
+                                ? "border-blue-300 bg-blue-50 text-blue-700"
+                                : "border-red-300 bg-red-50 text-red-700"
+                          }`}
+                        >
+                          {log.action === "INSERT"
+                            ? "등록"
+                            : log.action === "UPDATE"
+                              ? "수정"
+                              : "삭제"}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-slate-800">
+                            {log.actor_name ||
+                              log.actor_email ||
+                              "알 수 없는 사용자"}
+                          </p>
+
+                          {log.actor_name &&
+                            log.actor_email && (
+                              <p className="mt-0.5 truncate text-xs text-slate-400">
+                                {log.actor_email}
+                              </p>
+                            )}
+
+                          {log.action === "UPDATE" && (
+                            <div className="mt-1 text-xs text-slate-500">
+                              {getChangedFields(
+                                log.old_data,
+                                log.new_data
+                              )
+                                .slice(0, 3)
+                                .map((change) => (
+                                  <span
+                                    key={change.key}
+                                    className="mr-3"
+                                  >
+                                    {change.label}:{" "}
+                                    {formatAuditValue(
+                                      change.key,
+                                      change.oldValue
+                                    )}
+                                    {" → "}
+                                    {formatAuditValue(
+                                      change.key,
+                                      change.newValue
+                                    )}
+                                  </span>
+                                ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <p className="shrink-0 text-xs text-slate-500">
+                        {new Date(
+                          log.created_at
+                        ).toLocaleString("ko-KR")}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </details>
         </section>
       </div>
     </main>
@@ -325,4 +482,74 @@ function Info({
       </span>
     </div>
   );
+}
+
+function getChangedFields(
+  oldData: Record<string, unknown> | null,
+  newData: Record<string, unknown> | null
+) {
+  if (!oldData || !newData) return [];
+
+  const ignoredFields = [
+    "updated_at",
+    "created_at",
+    "id",
+  ];
+
+  const labelMap: Record<string, string> = {
+    name: "이름",
+    instagram_id: "Instagram ID",
+    instagram_url: "Instagram URL",
+    email: "이메일",
+    phone: "전화번호",
+    followers: "팔로워",
+    avg_views: "평균 조회수",
+    category: "카테고리",
+    subcategory: "세부 카테고리",
+    gender: "성별",
+    age_group: "연령대",
+    collaboration_rate: "협업 단가",
+    memo: "메모",
+  };
+
+  return Object.keys(newData)
+    .filter(
+      (key) =>
+        !ignoredFields.includes(key) &&
+        oldData[key] !== newData[key]
+    )
+    .map((key) => ({
+      key,
+      label: labelMap[key] || key,
+      oldValue: oldData[key],
+      newValue: newData[key],
+    }));
+}
+
+function formatAuditValue(
+  key: string,
+  value: unknown
+) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return "없음";
+  }
+
+  if (
+    key === "followers" ||
+    key === "avg_views"
+  ) {
+    return formatMan(Number(value));
+  }
+
+  if (key === "collaboration_rate") {
+    return formatPriceMan(
+      Number(value)
+    );
+  }
+
+  return String(value);
 }
