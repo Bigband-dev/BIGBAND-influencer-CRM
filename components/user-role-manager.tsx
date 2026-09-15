@@ -64,9 +64,6 @@ export default function UserRoleManager({
               이메일
             </th>
             <th className="px-5 py-4 text-left">
-              권한
-            </th>
-            <th className="px-5 py-4 text-left">
               관리
             </th>
           </tr>
@@ -82,11 +79,6 @@ export default function UserRoleManager({
               <td className="px-5 py-4">
                 {user.email || "-"}
               </td>
-
-              <td className="px-5 py-4">
-                {user.role}
-              </td>
-
               <td className="px-5 py-4">
                 {user.role === "owner" ? (
                   <span className="text-xs font-semibold text-slate-500">
