@@ -53,6 +53,7 @@ export default function SignupPage() {
         email,
         password,
         options: {
+          emailRedirectTo: window.location.origin,
           data: {
             name,
           },
@@ -67,7 +68,7 @@ export default function SignupPage() {
     }
 
     setMessage(
-    "인증 이메일을 발송했습니다. 이메일 인증을 완료한 뒤 로그인해주세요."
+    "인증 이메일을 발송했습니다. 이메일의 인증 링크를 클릭하면 인증 후 자동으로 로그인됩니다."
     );
   };
 
