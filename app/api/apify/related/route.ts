@@ -187,20 +187,21 @@ export async function POST(request: Request) {
       body.apifyToken || ""
     ).trim();
 
-    const rawSeeds = Array.isArray(body.seedAccounts)
-      ? body.seedAccounts
-      : [];
+    const rawSeeds: unknown[] =
+      Array.isArray(body.seedAccounts)
+        ? body.seedAccounts
+        : [];
 
     const seeds: string[] = Array.from(
-    new Set(
+      new Set(
         rawSeeds
-        .map((value: unknown) => cleanUsername(value))
-        .filter(
+          .map((value: unknown) => cleanUsername(value))
+          .filter(
             (value): value is string =>
-            typeof value === "string" &&
-            value.length > 0
-        )
-    )
+              typeof value === "string" &&
+              value.length > 0
+          )
+      )
     );
 
     const maxRelatedPerProfile = Math.max(
