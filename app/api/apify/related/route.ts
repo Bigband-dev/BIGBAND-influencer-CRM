@@ -237,6 +237,47 @@ export async function POST(request: Request) {
       token,
       seeds
     );
+    console.log(
+      "[RELATED DEBUG] profiles:",
+      profiles.length
+    );
+
+    for (const profile of profiles) {
+      const username = String(
+        profile?.username || ""
+      );
+
+      const keys = Object.keys(profile || {});
+
+      const relatedLikeKeys = keys.filter((key) => {
+        const lower = key.toLowerCase();
+
+        return (
+          lower.includes("related") ||
+          lower.includes("suggest") ||
+          lower.includes("similar")
+        );
+      });
+
+      console.log(
+        `[RELATED DEBUG] @${username}`,
+        {
+          relatedLikeKeys,
+          relatedProfilesType:
+            typeof profile?.relatedProfiles,
+          relatedProfilesIsArray:
+            Array.isArray(
+              profile?.relatedProfiles
+            ),
+          relatedProfilesLength:
+            Array.isArray(
+              profile?.relatedProfiles
+            )
+              ? profile.relatedProfiles.length
+              : null,
+        }
+      );
+    }
 
     const seedSet = new Set(
       seeds.map((x) => x.toLowerCase())
@@ -267,6 +308,12 @@ export async function POST(request: Request) {
       const related = parseRelatedProfiles(
         profile
       ).slice(0, maxRelatedPerProfile);
+
+      console.log(
+        `[RELATED DEBUG] parsed @${parentUsername}:`,
+        related.length,
+        related.slice(0, 5)
+      );
 
       for (const username of related) {
         const key = username.toLowerCase();

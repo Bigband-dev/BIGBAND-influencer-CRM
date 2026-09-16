@@ -36,22 +36,81 @@ export default function SearchPage() {
     setHashtagLoading,
   ] = useState(false);
 
-  const [
-    enrichedCandidates,
-    setEnrichedCandidates,
-  ] = useState<any[]>([]);
-
-  const [
-    enrichLoading,
-    setEnrichLoading,
-  ] = useState(false);
-
   function splitLines(value: string) {
     return value
       .split(/\r?\n|,/)
       .map((item) => item.trim())
       .filter(Boolean);
   }
+
+  async function enrichCandidates(
+    related: any[],
+    hashtag: any[],
+    seeds: string[]
+  ) {
+    const response = await fetch(
+      "/api/apify/enrich",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          apifyToken: apifyToken.trim(),
+
+          relatedCandidates: related,
+          hashtagCandidates: hashtag,
+
+          seedAccounts: seeds,
+
+          minFollowers: Number(minFollowers),
+          maxFollowers: Number(maxFollowers),
+        }),
+      }
+    );
+
+    const text = await response.text();
+
+    let result;
+
+    try {
+      result = JSON.parse(text);
+    } catch {
+      console.error(
+        "Enrich API non-json:",
+        response.status,
+        text
+      );
+
+      throw new Error(
+        `Enrich API 오류 (${response.status})`
+      );
+    }
+
+    if (!response.ok || !result.ok) {
+      throw new Error(
+        result.message ||
+          "후보 Profile 조회에 실패했습니다."
+      );
+    }
+
+    return result;
+  }
+
+  const [relatedResults, setRelatedResults] =
+    useState<any[]>([]);
+
+  const [hashtagResults, setHashtagResults] =
+    useState<any[]>([]);
+
+  const [mergedResults, setMergedResults] =
+    useState<any[]>([]);
+
+  const [relatedSearchLoading, setRelatedSearchLoading] =
+    useState(false);
+
+  const [hashtagSearchLoading, setHashtagSearchLoading] =
+    useState(false);
 
   async function handleSearch() {
     setMessage("");
@@ -191,9 +250,10 @@ export default function SearchPage() {
         setProfileLoading(false);
     }
   }
-  async function handleRelatedTest() {
+  async function handleRelatedSearch() {
     setMessage("");
-    setRelatedCandidates([]);
+    setRelatedResults([]);
+    setMergedResults([]);
 
     if (!apifyToken.trim()) {
       setMessage("Apify API Key를 입력해주세요.");
@@ -211,70 +271,145 @@ export default function SearchPage() {
       return;
     }
 
-    setRelatedLoading(true);
+    const target = Number(targetCount);
+
+    if (!Number.isFinite(target) || target < 1) {
+      setMessage("목표 후보 수를 확인해주세요.");
+      return;
+    }
+
+    setRelatedSearchLoading(true);
 
     try {
-      const response = await fetch(
-        "/api/apify/related",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            apifyToken: apifyToken.trim(),
-            seedAccounts: seeds,
+      /*
+        target=30이면 대략
+        60 → 120 → 180 related 후보까지 확장
 
-            // 기존 MVP 기본값과 동일
-            maxRelatedPerProfile: 20,
-            maxCandidates: 30,
-          }),
-        }
+        follower filter에서 많이 빠지는 것을 고려하여
+        목표 개수보다 넓게 수집한다.
+      */
+      const limits = Array.from(
+        new Set([
+          Math.max(20, target * 2),
+          Math.max(40, target * 4),
+          Math.max(80, target * 6),
+        ])
       );
 
-      const result = await response.json();
+      let bestCandidates: any[] = [];
+      let previousRawCount = -1;
 
-      if (!response.ok || !result.ok) {
+      for (const limit of limits) {
         setMessage(
-          result.message ||
-            "Related 검색에 실패했습니다."
+          `Related 후보 검색 중... 최대 ${limit}명 탐색`
         );
-        return;
+
+        const discoveryResponse = await fetch(
+          "/api/apify/related",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              apifyToken: apifyToken.trim(),
+              seedAccounts: seeds,
+
+              maxRelatedPerProfile: limit,
+              maxCandidates: limit,
+            }),
+          }
+        );
+
+        const discovery =
+          await discoveryResponse.json();
+
+        if (
+          !discoveryResponse.ok ||
+          !discovery.ok
+        ) {
+          throw new Error(
+            discovery.message ||
+              "Related 검색에 실패했습니다."
+          );
+        }
+
+        const rawCandidates =
+          discovery.candidates || [];
+
+        setRelatedCandidates(rawCandidates);
+
+        if (!rawCandidates.length) {
+          break;
+        }
+
+        const enriched = await enrichCandidates(
+          rawCandidates,
+          [],
+          seeds
+        );
+
+        bestCandidates =
+          enriched.candidates || [];
+
+        setMessage(
+          `Related ${rawCandidates.length}명 발견 → 팔로워 조건 ${bestCandidates.length}명 통과`
+        );
+
+        if (bestCandidates.length >= target) {
+          break;
+        }
+
+        // 탐색 범위를 늘렸는데 후보 수가 전혀 늘지 않았다면
+        // Actor가 더 이상 Related를 제공하지 않는 것으로 판단
+        if (
+          rawCandidates.length === previousRawCount
+        ) {
+          break;
+        }
+
+        previousRawCount =
+          rawCandidates.length;
       }
 
-      setRelatedCandidates(
-        result.candidates || []
-      );
+      const finalResults =
+        bestCandidates.slice(0, target);
 
-      setMessage(
-        `Related 후보 ${result.count}명 검색 완료`
-      );
+      setRelatedResults(finalResults);
+
+      if (finalResults.length >= target) {
+        setMessage(
+          `Related 검색 완료: 목표 ${target}명 확보`
+        );
+      } else {
+        setMessage(
+          `Related 검색 완료: 목표 ${target}명 중 ${finalResults.length}명 확보`
+        );
+      }
     } catch (error) {
       console.error(error);
 
       setMessage(
-        "Related 검색 중 오류가 발생했습니다."
+        error instanceof Error
+          ? error.message
+          : "Related 검색 중 오류가 발생했습니다."
       );
     } finally {
-      setRelatedLoading(false);
+      setRelatedSearchLoading(false);
     }
   }
-  async function handleHashtagTest() {
+  async function handleHashtagSearch() {
     setMessage("");
-    setHashtagCandidates([]);
+    setHashtagResults([]);
+    setMergedResults([]);
 
     if (!apifyToken.trim()) {
-      setMessage(
-        "Apify API Key를 입력해주세요."
-      );
+      setMessage("Apify API Key를 입력해주세요.");
       return;
     }
 
-    const tags = splitLines(
-      hashtags
-    ).map((value) =>
-      value.replace(/^#/, "")
+    const tags = splitLines(hashtags).map(
+      (value) => value.replace(/^#/, "")
     );
 
     if (!tags.length) {
@@ -284,73 +419,123 @@ export default function SearchPage() {
       return;
     }
 
-    setHashtagLoading(true);
+    const target = Number(targetCount);
+
+    if (!Number.isFinite(target) || target < 1) {
+      setMessage("목표 후보 수를 확인해주세요.");
+      return;
+    }
+
+    setHashtagSearchLoading(true);
 
     try {
-      const response = await fetch(
-        "/api/apify/hashtag",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            apifyToken:
-              apifyToken.trim(),
-            hashtags: tags,
+      const limits = [
+        50,
+        100,
+        200,
+        400,
+        500,
+      ];
 
-            // 일단 1차 테스트
-            resultsLimit: 50,
-          }),
-        }
-      );
+      let bestCandidates: any[] = [];
 
-      const result =
-        await response.json();
-
-      if (
-        !response.ok ||
-        !result.ok
-      ) {
+      for (const limit of limits) {
         setMessage(
-          result.message ||
-            "Hashtag 검색에 실패했습니다."
+          `Hashtag 검색 중... 게시물 최대 ${limit}개 탐색`
         );
-        return;
+
+        const discoveryResponse = await fetch(
+          "/api/apify/hashtag",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              apifyToken:
+                apifyToken.trim(),
+
+              hashtags: tags,
+
+              resultsLimit: limit,
+            }),
+          }
+        );
+
+        const discovery =
+          await discoveryResponse.json();
+
+        if (
+          !discoveryResponse.ok ||
+          !discovery.ok
+        ) {
+          throw new Error(
+            discovery.message ||
+              "Hashtag 검색에 실패했습니다."
+          );
+        }
+
+        const rawCandidates =
+          discovery.candidates || [];
+
+        setHashtagCandidates(rawCandidates);
+
+        if (!rawCandidates.length) {
+          continue;
+        }
+
+        const enriched =
+          await enrichCandidates(
+            [],
+            rawCandidates,
+            []
+          );
+
+        bestCandidates =
+          enriched.candidates || [];
+
+        setMessage(
+          `Hashtag limit ${limit}: ${rawCandidates.length}명 발견 → 팔로워 조건 ${bestCandidates.length}명 통과`
+        );
+
+        if (bestCandidates.length >= target) {
+          break;
+        }
       }
 
-      setHashtagCandidates(
-        result.candidates || []
-      );
+      const finalResults =
+        bestCandidates.slice(0, target);
 
-      setMessage(
-        `Hashtag 검색 완료: 게시물 ${result.stats?.usableMediaRows ?? 0}개 / 후보 ${result.stats?.uniqueCreators ?? 0}명`
-      );
+      setHashtagResults(finalResults);
+
+      if (finalResults.length >= target) {
+        setMessage(
+          `Hashtag 검색 완료: 목표 ${target}명 확보`
+        );
+      } else {
+        setMessage(
+          `Hashtag 검색 완료: 목표 ${target}명 중 ${finalResults.length}명 확보`
+        );
+      }
     } catch (error) {
       console.error(error);
 
       setMessage(
-        "Hashtag 검색 중 오류가 발생했습니다."
+        error instanceof Error
+          ? error.message
+          : "Hashtag 검색 중 오류가 발생했습니다."
       );
     } finally {
-      setHashtagLoading(false);
+      setHashtagSearchLoading(false);
     }
   }
-  async function handleEnrichCandidates() {
+  function handleMergeResults() {
     setMessage("");
-    setEnrichedCandidates([]);
-
-    if (!apifyToken.trim()) {
-      setMessage(
-        "Apify API Key를 입력해주세요."
-      );
-      return;
-    }
 
     if (
-      relatedCandidates.length === 0 &&
-      hashtagCandidates.length === 0
+      relatedResults.length === 0 &&
+      hashtagResults.length === 0
     ) {
       setMessage(
         "먼저 Related 또는 Hashtag 검색을 실행해주세요."
@@ -358,103 +543,69 @@ export default function SearchPage() {
       return;
     }
 
-    const seeds = splitLines(
-      seedAccounts
-    ).map((v) =>
-      v.replace(/^@/, "")
-    );
+    const map = new Map<string, any>();
 
-    setEnrichLoading(true);
+    for (const candidate of [
+      ...relatedResults,
+      ...hashtagResults,
+    ]) {
+      const key =
+        String(candidate.username || "")
+          .toLowerCase()
+          .trim();
 
-    try {
-      console.log("MERGE INPUT", {
-        relatedCount: relatedCandidates.length,
-        hashtagCount: hashtagCandidates.length,
-        related: relatedCandidates,
-        hashtag: hashtagCandidates,
+      if (!key) continue;
+
+      const existing = map.get(key);
+
+      if (!existing) {
+        map.set(key, {
+          ...candidate,
+
+          discoverySources:
+            candidate.discoverySources ||
+            [candidate.source].filter(Boolean),
+        });
+
+        continue;
+      }
+
+      map.set(key, {
+        ...existing,
+
+        discoverySources: Array.from(
+          new Set([
+            ...(existing.discoverySources || []),
+            ...(candidate.discoverySources || []),
+            candidate.source,
+          ].filter(Boolean))
+        ),
+
+        referenceHits: Array.from(
+          new Set([
+            ...(existing.referenceHits || []),
+            ...(candidate.referenceHits || []),
+          ])
+        ),
+
+        sourceHashtags: Array.from(
+          new Set([
+            ...(existing.sourceHashtags || []),
+            ...(candidate.sourceHashtags || []),
+          ])
+        ),
       });
-
-      const response = await fetch(
-        "/api/apify/enrich",
-        {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-
-          body: JSON.stringify({
-            apifyToken:
-              apifyToken.trim(),
-
-            relatedCandidates,
-
-            hashtagCandidates,
-
-            seedAccounts: seeds,
-
-            minFollowers:
-              Number(minFollowers),
-
-            maxFollowers:
-              Number(maxFollowers),
-          }),
-        }
-      );
-
-      const text =
-        await response.text();
-
-      let result;
-
-      try {
-        result =
-          JSON.parse(text);
-      } catch {
-        console.error(
-          "Enrich non-json:",
-          response.status,
-          text
-        );
-
-        setMessage(
-          `후보 필터 API 오류 (${response.status})`
-        );
-
-        return;
-      }
-
-      if (
-        !response.ok ||
-        !result.ok
-      ) {
-        setMessage(
-          result.message ||
-            "후보 필터링에 실패했습니다."
-        );
-
-        return;
-      }
-
-      setEnrichedCandidates(
-        result.candidates || []
-      );
-
-      setMessage(
-        `후보 통합 완료: ${result.stats.merged}명 → 팔로워 조건 충족 ${result.stats.followerFit}명`
-      );
-    } catch (error) {
-      console.error(error);
-
-      setMessage(
-        "후보 통합 중 오류가 발생했습니다."
-      );
-    } finally {
-      setEnrichLoading(false);
     }
-  }
 
+    const merged =
+      Array.from(map.values());
+
+    setMergedResults(merged);
+
+    setMessage(
+      `결과 합치기 완료: Related ${relatedResults.length}명 + Hashtag ${hashtagResults.length}명 → 중복 제거 후 ${merged.length}명`
+    );
+  }
 
   return (
     <div className="mx-auto max-w-6xl px-8 py-8">
@@ -607,54 +758,39 @@ export default function SearchPage() {
           )}
 
           <div className="flex justify-end gap-3">
-            <button
-              type="button"
-              disabled={enrichLoading}
-              onClick={handleEnrichCandidates}
-              className="rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-            >
-              {enrichLoading
-                ? "후보 필터링 중..."
-                : "후보 통합 + 팔로워 필터"}
-            </button>
-            <button
-              type="button"
-              disabled={hashtagLoading}
-              onClick={handleHashtagTest}
-              className="rounded-lg border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {hashtagLoading
-                ? "Hashtag 검색 중..."
-                : "Hashtag 테스트"}
-            </button>
-            <button
-              type="button"
-              disabled={relatedLoading}
-              onClick={handleRelatedTest}
-              className="rounded-lg border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {relatedLoading
-                ? "Related 검색 중..."
-                : "Related 테스트"}
-            </button>
-            <button
+             <button
                 type="button"
-                disabled={profileLoading}
-                onClick={handleProfileTest}
-                className="rounded-lg border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                >
-                {profileLoading
-                    ? "Profile 조회 중..."
-                    : "Profile 테스트"}
-            </button>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={handleSearch}
-              className="rounded-lg bg-slate-900 px-6 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {loading ? "확인 중..." : "인플루언서 찾기"}
-            </button>
+                disabled={relatedSearchLoading}
+                onClick={handleRelatedSearch}
+                className="rounded-lg bg-slate-900 px-6 py-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+              >
+                {relatedSearchLoading
+                  ? "Related 검색 중..."
+                  : "Related 계정으로 찾기"}
+              </button>
+
+              <button
+                type="button"
+                disabled={hashtagSearchLoading}
+                onClick={handleHashtagSearch}
+                className="rounded-lg bg-blue-600 px-6 py-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {hashtagSearchLoading
+                  ? "Hashtag 검색 중..."
+                  : "해시태그로 찾기"}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleMergeResults}
+                disabled={
+                  relatedResults.length === 0 &&
+                  hashtagResults.length === 0
+                }
+                className="rounded-lg border border-slate-300 bg-white px-6 py-4 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+              >
+                두 결과 합치기
+              </button>
           </div>
         </div>
       </div>
@@ -876,127 +1012,7 @@ export default function SearchPage() {
             </div>
           </div>
         )}
-        {enrichedCandidates.length > 0 && (
-          <div className="mt-8 rounded-xl border border-slate-300 bg-white p-6">
-            <div className="mb-4">
-              <h2 className="text-lg font-bold text-slate-900">
-                1차 후보 리스트
-              </h2>
-
-              <p className="mt-1 text-sm text-slate-500">
-                팔로워 조건을 통과한 후보{" "}
-                {enrichedCandidates.length}명
-              </p>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm">
-                <thead>
-                  <tr className="border-b border-slate-300 bg-slate-50 text-left">
-                    <th className="px-4 py-3">
-                      Instagram
-                    </th>
-
-                    <th className="px-4 py-3">
-                      이름
-                    </th>
-
-                    <th className="px-4 py-3">
-                      팔로워
-                    </th>
-
-                    <th className="px-4 py-3">
-                      발견 경로
-                    </th>
-
-                    <th className="px-4 py-3">
-                      Reference
-                    </th>
-
-                    <th className="px-4 py-3">
-                      Graph
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {enrichedCandidates.map(
-                    (candidate) => (
-                      <tr
-                        key={
-                          candidate.username
-                        }
-                        className="border-b border-slate-200"
-                      >
-                        <td className="px-4 py-3">
-                          <a
-                            href={
-                              candidate.instagramUrl
-                            }
-                            target="_blank"
-                            rel="noreferrer"
-                            className="font-medium text-blue-600 hover:underline"
-                          >
-                            @{candidate.username}
-                          </a>
-                        </td>
-
-                        <td className="px-4 py-3">
-                          {candidate.displayName ||
-                            "-"}
-                        </td>
-
-                        <td className="px-4 py-3 font-medium">
-                          {candidate.followers !=
-                          null
-                            ? Number(
-                                candidate.followers
-                              ).toLocaleString()
-                            : "-"}
-                        </td>
-
-                        <td className="px-4 py-3">
-                          {(candidate.discoverySources ||
-                            [])
-                            .map(
-                              (source: string) =>
-                                source ===
-                                "seed_related"
-                                  ? "Related"
-                                  : source ===
-                                    "hashtag"
-                                  ? "Hashtag"
-                                  : source
-                            )
-                            .join(" + ")}
-                        </td>
-
-                        <td className="px-4 py-3">
-                          {candidate.referenceHits
-                            ?.map(
-                              (x: string) =>
-                                `@${x}`
-                            )
-                            .join(", ") ||
-                            "-"}
-                        </td>
-
-                        <td className="px-4 py-3">
-                          {typeof candidate.graphSimilarity ===
-                          "number"
-                            ? candidate.graphSimilarity.toFixed(
-                                3
-                              )
-                            : "-"}
-                        </td>
-                      </tr>
-                    )
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+        
       <div className="mt-8 rounded-xl border border-slate-300 bg-white p-6">
         <h2 className="text-lg font-bold text-slate-900">
           검색 결과
