@@ -21,10 +21,15 @@ export default async function CRMLayout({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("name, email, role")
+    .select("name, email, role, is_active")
     .eq("id", user.id)
     .single();
 
+    if (!profile || !profile.is_active) {
+      await supabase.auth.signOut();
+
+      redirect("/login?error=inactive");
+    }
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <Sidebar

@@ -57,60 +57,63 @@ export default function Sidebar({
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-70 overflow-y-auto flex-col border-r-2 border-slate-700 bg-slate-900 text-white">
 
       {/* 로고 */}
-      <div className="border-b border-slate-700 px-6 py-6 flex flex-col items-center">
-        <img
-          src="/logo.png"
-          alt="Bigband logo"
-          className="h-16 w-auto"
-        />
+      <div className="shrink-0 border-b border-slate-700 px-6 py-6 ">
+        <div className="flex flex-col items-center">
+          <img
+            src="/logo.png"
+            alt="Bigband logo"
+            className="h-16 w-auto"
+          />
 
-        <p className="mt-3 text-base font-bold tracking-wider">
-          BIGBAND 인플루언서 DB
-        </p>
+          <p className="mt-3 text-base font-bold tracking-tight text-white">
+            BIGBAND 인플루언서 DB
+          </p>
+        </div>
       </div>
 
       {/* 메뉴 */}
-      <nav className="flex-1 space-y-2 px-4 py-6">
+      <div className="sidebar-scroll flex-1 overflow-y-auto px-3 py-4">
+        <nav className="space-y-1">
+          <Link
+            href="/influencers"
+            className={customMenuClass(isInfluencers)}
+          >
+            인플루언서 DB
+          </Link>
 
-        <Link
-          href="/influencers"
-          className={customMenuClass(isInfluencers)}
-        >
-          인플루언서 DB
-        </Link>
+          <Link
+            href="/campaigns"
+            className={customMenuClass(isCampaigns)}
+          >
+            캠페인
+          </Link>
 
-        <Link
-          href="/campaigns"
-          className={customMenuClass(isCampaigns)}
-        >
-          캠페인
-        </Link>
+          <Link
+            href="/search"
+            className={customMenuClass(isSearch)}
+          >
+            인플루언서 서칭
+          </Link>
 
-        <Link
-          href="/search"
-          className={customMenuClass(isSearch)}
-        >
-          인플루언서 서칭
-        </Link>
-
-        <Link
-          href="/logs"
-          className={customMenuClass(isLogs)}
-        >
-          사용기록
-        </Link>
-        <Link
-          href="/account"
-          className={`block rounded-lg px-3 py-2.5 text-sm font-medium ${
-            pathname.startsWith(
-              "/account"
-            )
-              ? "bg-slate-700 text-white"
-              : "text-slate-300 hover:bg-slate-800 hover:text-white"
-          }`}
-        >
-          내 계정
-        </Link>
+          <Link
+            href="/logs"
+            className={customMenuClass(isLogs)}
+          >
+            사용기록
+          </Link>
+          <Link
+            href="/account"
+            className={`block rounded-lg px-3 py-2.5 text-sm font-medium ${
+              pathname.startsWith(
+                "/account"
+              )
+                ? "bg-slate-700 text-white"
+                : "text-slate-300 hover:bg-slate-800 hover:text-white"
+            }`}
+          >
+            내 계정
+          </Link>
+        </nav>
 
         {/* 관리자 메뉴 */}
         {canAccessAdmin && (
@@ -157,9 +160,7 @@ export default function Sidebar({
             </nav>
           </div>
         )}
-
-      </nav>
-
+      </div>
       {/* 사용자 정보 */}
       <div className="border-t border-slate-700 px-6 py-5">
 
