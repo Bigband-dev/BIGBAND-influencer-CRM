@@ -868,60 +868,80 @@ export default function SearchPage() {
                 </thead>
 
                 <tbody>
-                  {relatedCandidates.map(
-                    (candidate) => (
-                      <tr
-                        key={candidate.username}
-                        className="border-b border-slate-200"
-                      >
-                        <td className="px-4 py-3">
-                          <a
-                            href={
-                              candidate.profileUrl
-                            }
-                            target="_blank"
-                            rel="noreferrer"
-                            className="font-medium text-blue-600 hover:underline"
-                          >
-                            @{candidate.username}
-                          </a>
-                        </td>
+                  {relatedResults.length > 0 && (
+                    <div className="mt-8 rounded-xl border border-slate-300 bg-white p-6">
+                      <div className="mb-4">
+                        <h2 className="text-lg font-bold text-slate-900">
+                          Related 검색 결과
+                        </h2>
 
-                        <td className="px-4 py-3 text-slate-600">
-                          @{candidate.sourceSeed}
-                        </td>
+                        <p className="mt-1 text-sm text-slate-500">
+                          {relatedResults.length}명
+                        </p>
+                      </div>
 
-                        <td className="px-4 py-3">
-                          {candidate.referenceHits?.join(
-                            ", "
-                          ) || "-"}
-                        </td>
+                      <div className="overflow-x-auto">
+                        <table className="w-full border-collapse text-sm">
+                          <thead>
+                            <tr className="border-b border-slate-300 bg-slate-50 text-left">
+                              <th className="px-4 py-3">Instagram</th>
+                              <th className="px-4 py-3">이름</th>
+                              <th className="px-4 py-3">팔로워</th>
+                              <th className="px-4 py-3">발견 경로</th>
+                            </tr>
+                          </thead>
 
-                        <td className="px-4 py-3">
-                          {typeof candidate.graphSimilarity ===
-                          "number"
-                            ? candidate.graphSimilarity.toFixed(
-                                3
-                              )
-                            : "-"}
-                        </td>
-                      </tr>
-                    )
+                          <tbody>
+                            {relatedResults.map((candidate) => (
+                              <tr
+                                key={candidate.username}
+                                className="border-b border-slate-200"
+                              >
+                                <td className="px-4 py-3">
+                                  <a
+                                    href={candidate.instagramUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="font-medium text-blue-600 hover:underline"
+                                  >
+                                    @{candidate.username}
+                                  </a>
+                                </td>
+
+                                <td className="px-4 py-3">
+                                  {candidate.displayName || "-"}
+                                </td>
+
+                                <td className="px-4 py-3">
+                                  {candidate.followers != null
+                                    ? Number(candidate.followers).toLocaleString()
+                                    : "-"}
+                                </td>
+
+                                <td className="px-4 py-3">
+                                  Related
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
                   )}
                 </tbody>
               </table>
             </div>
           </div>
         )}
-        {hashtagCandidates.length > 0 && (
+        {hashtagResults.length > 0 && (
           <div className="mt-8 rounded-xl border border-slate-300 bg-white p-6">
             <div className="mb-4">
               <h2 className="text-lg font-bold text-slate-900">
-                Hashtag 후보
+                Hashtag 검색 결과
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
-                {hashtagCandidates.length}명
+                {hashtagResults.length}명
               </p>
             </div>
 
@@ -929,90 +949,120 @@ export default function SearchPage() {
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-slate-300 bg-slate-50 text-left">
-                    <th className="px-4 py-3">
-                      Instagram
-                    </th>
-
-                    <th className="px-4 py-3">
-                      발견 해시태그
-                    </th>
-
-                    <th className="px-4 py-3">
-                      발견 게시물
-                    </th>
-
-                    <th className="px-4 py-3">
-                      광고성
-                    </th>
-
-                    <th className="px-4 py-3">
-                      광고 비율
-                    </th>
+                    <th className="px-4 py-3">Instagram</th>
+                    <th className="px-4 py-3">이름</th>
+                    <th className="px-4 py-3">팔로워</th>
+                    <th className="px-4 py-3">발견 해시태그</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {hashtagCandidates.map(
-                    (candidate) => (
-                      <tr
-                        key={
-                          candidate.username
-                        }
-                        className="border-b border-slate-200"
-                      >
-                        <td className="px-4 py-3">
-                          <a
-                            href={
-                              candidate.profileUrl
-                            }
-                            target="_blank"
-                            rel="noreferrer"
-                            className="font-medium text-blue-600 hover:underline"
-                          >
-                            @{candidate.username}
-                          </a>
-                        </td>
+                  {hashtagResults.map((candidate) => (
+                    <tr
+                      key={candidate.username}
+                      className="border-b border-slate-200"
+                    >
+                      <td className="px-4 py-3">
+                        <a
+                          href={candidate.instagramUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-medium text-blue-600 hover:underline"
+                        >
+                          @{candidate.username}
+                        </a>
+                      </td>
 
-                        <td className="px-4 py-3">
-                          {candidate.sourceHashtags
-                            ?.map(
-                              (tag: string) =>
-                                `#${tag}`
-                            )
-                            .join(", ") ||
-                            "-"}
-                        </td>
+                      <td className="px-4 py-3">
+                        {candidate.displayName || "-"}
+                      </td>
 
-                        <td className="px-4 py-3">
-                          {
-                            candidate.hashtagDiscoveryPosts
-                          }
-                        </td>
+                      <td className="px-4 py-3">
+                        {candidate.followers != null
+                          ? Number(candidate.followers).toLocaleString()
+                          : "-"}
+                      </td>
 
-                        <td className="px-4 py-3">
-                          {
-                            candidate.hashtagAdPosts
-                          }
-                        </td>
-
-                        <td className="px-4 py-3">
-                          {typeof candidate.hashtagAdRatio ===
-                          "number"
-                            ? `${(
-                                candidate.hashtagAdRatio *
-                                100
-                              ).toFixed(1)}%`
-                            : "-"}
-                        </td>
-                      </tr>
-                    )
-                  )}
+                      <td className="px-4 py-3">
+                        {candidate.sourceHashtags
+                          ?.map((tag: string) => `#${tag}`)
+                          .join(", ") || "-"}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
           </div>
         )}
-        
+        {mergedResults.length > 0 && (
+          <div className="mt-8 rounded-xl border border-slate-300 bg-white p-6">
+            <div className="mb-4">
+              <h2 className="text-lg font-bold text-slate-900">
+                통합 결과
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                중복 제거 후 {mergedResults.length}명
+              </p>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-slate-300 bg-slate-50 text-left">
+                    <th className="px-4 py-3">Instagram</th>
+                    <th className="px-4 py-3">이름</th>
+                    <th className="px-4 py-3">팔로워</th>
+                    <th className="px-4 py-3">발견 경로</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {mergedResults.map((candidate) => (
+                    <tr
+                      key={candidate.username}
+                      className="border-b border-slate-200"
+                    >
+                      <td className="px-4 py-3">
+                        <a
+                          href={candidate.instagramUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-medium text-blue-600 hover:underline"
+                        >
+                          @{candidate.username}
+                        </a>
+                      </td>
+
+                      <td className="px-4 py-3">
+                        {candidate.displayName || "-"}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        {candidate.followers != null
+                          ? Number(candidate.followers).toLocaleString()
+                          : "-"}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        {(candidate.discoverySources || [])
+                          .map((source: string) =>
+                            source === "seed_related"
+                              ? "Related"
+                              : source === "hashtag"
+                              ? "Hashtag"
+                              : source
+                          )
+                          .join(" + ")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       <div className="mt-8 rounded-xl border border-slate-300 bg-white p-6">
         <h2 className="text-lg font-bold text-slate-900">
           검색 결과

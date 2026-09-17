@@ -49,10 +49,12 @@ export default function Sidebar({
       ? "block rounded-lg bg-slate-700 px-4 py-3 text-sm font-semibold text-white"
       : "block rounded-lg px-4 py-3 text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white";
 
-  const isLogs =
-  pathname.startsWith("/logs");      
+  const isLogs = pathname.startsWith("/logs"); 
+  
+  const canAccessAdmin = isAdmin(role);
+
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r-2 border-slate-700 bg-slate-900 text-white">
+    <aside className="fixed left-0 top-0 z-40 flex h-screen w-70 overflow-y-auto flex-col border-r-2 border-slate-700 bg-slate-900 text-white">
 
       {/* 로고 */}
       <div className="border-b border-slate-700 px-6 py-6 flex flex-col items-center">
@@ -97,23 +99,63 @@ export default function Sidebar({
         >
           사용기록
         </Link>
+        <Link
+          href="/account"
+          className={`block rounded-lg px-3 py-2.5 text-sm font-medium ${
+            pathname.startsWith(
+              "/account"
+            )
+              ? "bg-slate-700 text-white"
+              : "text-slate-300 hover:bg-slate-800 hover:text-white"
+          }`}
+        >
+          내 계정
+        </Link>
 
         {/* 관리자 메뉴 */}
-        {isAdmin(role) && (
-          <>
+        {canAccessAdmin && (
+          <div className="mt-8">
             <div className="my-5 border-t border-slate-700" />
 
-            <p className="px-4 pb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Admin
-            </p>
+            <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              관리자 메뉴
+            </div>
 
-            <Link
-              href="/admin/users"
-              className={customMenuClass(isUsers)}
-            >
-              사용자 관리
-            </Link>
-          </>
+            <nav className="space-y-1">
+              <Link
+                href="/admin"
+                className={`block rounded-lg px-3 py-2.5 text-sm font-medium ${
+                  pathname === "/admin"
+                    ? "bg-slate-700 text-white"
+                    : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                }`}
+              >
+                관리자 대시보드
+              </Link>
+
+              <Link
+                href="/admin/users"
+                className={`block rounded-lg px-3 py-2.5 text-sm font-medium ${
+                  pathname.startsWith("/admin/users")
+                    ? "bg-slate-700 text-white"
+                    : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                }`}
+              >
+                사용자 관리
+              </Link>
+
+              <Link
+                href="/admin/name-requests"
+                className={`block rounded-lg px-3 py-2.5 text-sm font-medium ${
+                  pathname.startsWith("/admin/name-requests")
+                    ? "bg-slate-700 text-white"
+                    : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                }`}
+              >
+                이름 변경 요청
+              </Link>
+            </nav>
+          </div>
         )}
 
       </nav>
