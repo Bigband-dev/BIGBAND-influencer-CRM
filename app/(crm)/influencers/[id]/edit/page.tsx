@@ -26,16 +26,57 @@ export default async function EditInfluencerPage({
     redirect("/login");
   }
 
+  /*
+   * 인플루언서 기본 정보 +
+   * 연결된 모든 채널 정보 조회
+   */
   const { data: influencer, error } =
     await supabase
       .from("influencers")
-      .select("*")
+      .select(`
+        *,
+        channels:influencer_channels (
+          id,
+          influencer_id,
+          platform,
+          channel_name,
+          handle,
+          url,
+          followers,
+          avg_views,
+          is_primary,
+          memo
+        )
+      `)
       .eq("id", id)
       .single();
 
   if (error || !influencer) {
     notFound();
   }
+
+  /*
+   * 대표 채널을 앞쪽으로 정렬
+   * 수정 폼에서도 대표 채널을 먼저 보여주기 위함
+   */
+  const sortedChannels = [
+    ...(influencer.channels ?? []),
+  ].sort((a, b) => {
+    if (a.is_primary && !b.is_primary) {
+      return -1;
+    }
+
+    if (!a.is_primary && b.is_primary) {
+      return 1;
+    }
+
+    return 0;
+  });
+
+  const initialData = {
+    ...influencer,
+    channels: sortedChannels,
+  };
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
@@ -55,10 +96,14 @@ export default async function EditInfluencerPage({
           <h1 className="mt-1 text-3xl font-bold">
             인플루언서 수정
           </h1>
+
+          <p className="mt-2 text-sm text-slate-500">
+            기본 정보와 SNS / 콘텐츠 채널을 수정할 수 있습니다.
+          </p>
         </div>
 
         <InfluencerForm
-          initialData={influencer}
+          initialData={initialData}
         />
       </div>
     </main>

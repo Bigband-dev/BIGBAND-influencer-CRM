@@ -1,18 +1,28 @@
 import Link from "next/link";
+
 import {
   notFound,
   redirect,
 } from "next/navigation";
+
 import { createClient } from "@/lib/supabase/server";
 import DeleteInfluencerButton from "@/components/delete-influencer-button";
 import {
   formatMan,
   formatPriceMan,
 } from "@/lib/format-number";
+
 import {
   getCampaignInfluencerStatusLabel,
   getCampaignInfluencerStatusClass,
 } from "@/lib/campaign-status";
+
+import PlatformBadge from "@/components/platform-badge";
+
+import type {
+  InfluencerChannel,
+} from "@/types/influencer";
+
 
 export const instant = false;
 
@@ -33,18 +43,39 @@ export default async function InfluencerDetailPage({
     redirect("/login");
   }
 
-  const {
-    data: influencer,
-    error,
-  } = await supabase
+  const { data: influencer, error } = await supabase
     .from("influencers")
-    .select("*")
+    .select(`
+      *,
+      channels:influencer_channels (
+        id,
+        influencer_id,
+        platform,
+        channel_name,
+        handle,
+        url,
+        followers,
+        avg_views,
+        is_primary,
+        memo
+      )
+    `)
     .eq("id", id)
     .single();
 
   if (error || !influencer) {
     notFound();
   }
+
+  const channels: InfluencerChannel[] =
+    influencer.channels ?? [];
+
+  const primaryChannel =
+    channels.find(
+      (channel) => channel.is_primary
+    ) ??
+    channels[0] ??
+    null;
 
   const { data: campaignHistory } =
     await supabase
@@ -135,19 +166,66 @@ export default async function InfluencerDetailPage({
           ← 인플루언서 목록
         </Link>
 
-        <div className="mt-5 rounded-xl border border-slate-200 bg-white p-6">
-          <div className="flex items-start justify-between">
+        <div className="mt-5 rounded-xl border border-slate-300 bg-white p-6">
+          <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
             <div>
-              <h1 className="mt-1 text-3xl font-bold">
-                {influencer.name ||
-                  influencer.instagram_id}
-              </h1>
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="text-3xl font-bold text-slate-900">
+                  {influencer.name ||
+                    primaryChannel?.channel_name ||
+                    primaryChannel?.handle ||
+                    "이름 없음"}
+                </h1>
+
+                {primaryChannel && (
+                  <PlatformBadge
+                    platform={primaryChannel.platform}
+                  />
+                )}
+              </div>
+
+              {primaryChannel && (
+                <div className="mt-2 text-sm text-slate-500">
+                  {primaryChannel.channel_name && (
+                    <span>
+                      {primaryChannel.channel_name}
+                    </span>
+                  )}
+
+                  {primaryChannel.handle && (
+                    <span
+                      className={
+                        primaryChannel.channel_name
+                          ? "ml-2"
+                          : ""
+                      }
+                    >
+                      @{primaryChannel.handle}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {channels.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {channels.map((channel, index) => (
+                    <PlatformBadge
+                      key={
+                        channel.id ??
+                        `${channel.platform}-${index}`
+                      }
+                      platform={channel.platform}
+                      compact
+                    />
+                  ))}
+                </div>
+              )}
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <Link
                 href={`/influencers/${influencer.id}/edit`}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 수정
               </Link>
@@ -156,29 +234,28 @@ export default async function InfluencerDetailPage({
                 influencerId={influencer.id}
                 influencerName={
                   influencer.name ||
-                  `@${influencer.instagram_id}`
+                  primaryChannel?.handle ||
+                  "인플루언서"
                 }
               />
 
-              {influencer.instagram_url && (
+              {primaryChannel?.url && (
                 <a
-                  href={
-                    influencer.instagram_url
-                  }
+                  href={primaryChannel.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
                 >
-                  Instagram 열기
+                  대표 채널 열기
                 </a>
               )}
             </div>
           </div>
         </div>
-
         <div className="mt-5 grid gap-5 md:grid-cols-2">
-          <section className="rounded-xl border border-slate-200 bg-white p-6">
-            <h2 className="mb-5 text-lg font-semibold">
+          {/* 기본 정보 */}
+          <section className="rounded-xl border border-slate-300 bg-white p-6">
+            <h2 className="mb-5 text-lg font-semibold text-slate-900">
               기본 정보
             </h2>
 
@@ -186,11 +263,6 @@ export default async function InfluencerDetailPage({
               <Info
                 label="이름"
                 value={influencer.name}
-              />
-
-              <Info
-                label="Instagram ID"
-                value={`@${influencer.instagram_id}`}
               />
 
               <Info
@@ -205,9 +277,7 @@ export default async function InfluencerDetailPage({
 
               <Info
                 label="세부 카테고리"
-                value={
-                  influencer.subcategory
-                }
+                value={influencer.subcategory}
               />
 
               <Info
@@ -217,42 +287,169 @@ export default async function InfluencerDetailPage({
 
               <Info
                 label="연령대"
-                value={
-                  influencer.age_group
-                }
+                value={influencer.age_group}
               />
             </div>
           </section>
 
-          <section className="rounded-xl border border-slate-200 bg-white p-6">
-            <h2 className="mb-5 text-lg font-semibold">
-              성과 및 단가
+          {/* 협업 정보 */}
+          <section className="rounded-xl border border-slate-300 bg-white p-6">
+            <h2 className="mb-5 text-lg font-semibold text-slate-900">
+              협업 정보
             </h2>
 
             <div className="space-y-4 text-sm">
-              <Info
-                label="팔로워"
-                value={formatMan(
-                  influencer.followers
-                )}
-              />
-
-              <Info
-                label="평균 조회수"
-                value={formatMan(
-                  influencer.avg_views
-                )}
-              />
-
               <Info
                 label="최근 협업 단가"
                 value={formatPriceMan(
                   influencer.collaboration_rate
                 )}
               />
+
+              <Info
+                label="등록 채널 수"
+                value={`${channels.length}개`}
+              />
+
+              <Info
+                label="대표 채널"
+                value={
+                  primaryChannel
+                    ? getPlatformLabel(
+                        primaryChannel.platform
+                      )
+                    : "-"
+                }
+              />
+
+              <Info
+                label="대표 채널 팔로워"
+                value={
+                  primaryChannel
+                    ? formatMan(
+                        primaryChannel.followers
+                      )
+                    : "-"
+                }
+              />
             </div>
           </section>
         </div>
+        <section className="mt-5 rounded-xl border border-slate-300 bg-white p-6">
+          <div className="mb-5 flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">
+                채널 정보
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                등록된 SNS 및 콘텐츠 채널입니다.
+              </p>
+            </div>
+
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+              {channels.length}개
+            </span>
+          </div>
+
+          {channels.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-300 px-6 py-10 text-center text-sm text-slate-400">
+              등록된 채널이 없습니다.
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {channels.map((channel, index) => (
+                <div
+                  key={
+                    channel.id ??
+                    `${channel.platform}-${index}`
+                  }
+                  className={`rounded-xl border p-5 ${
+                    channel.is_primary
+                      ? "border-slate-500 bg-slate-50"
+                      : "border-slate-300 bg-white"
+                  }`}
+                >
+                  {/* 플랫폼 / 대표채널 */}
+                  <div className="flex items-center justify-between gap-3">
+                    <PlatformBadge
+                      platform={channel.platform}
+                    />
+
+                    {channel.is_primary && (
+                      <span className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white">
+                        대표 채널
+                      </span>
+                    )}
+                  </div>
+
+                  {/* 채널명 / ID */}
+                  <div className="mt-4">
+                    <p className="font-semibold text-slate-900">
+                      {channel.channel_name ||
+                        (channel.handle
+                          ? `@${channel.handle}`
+                          : "채널명 없음")}
+                    </p>
+
+                    {channel.channel_name &&
+                      channel.handle && (
+                        <p className="mt-1 text-sm text-slate-500">
+                          @{channel.handle}
+                        </p>
+                      )}
+                  </div>
+
+                  {/* 지표 */}
+                  <div className="mt-5 grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-slate-500">
+                        팔로워 / 구독자
+                      </p>
+
+                      <p className="mt-1 font-semibold text-slate-900">
+                        {formatMan(
+                          channel.followers
+                        )}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs text-slate-500">
+                        평균 조회수
+                      </p>
+
+                      <p className="mt-1 font-semibold text-slate-900">
+                        {formatMan(
+                          channel.avg_views
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 메모 */}
+                  {channel.memo && (
+                    <div className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                      {channel.memo}
+                    </div>
+                  )}
+
+                  {/* 링크 */}
+                  {channel.url && (
+                    <a
+                      href={channel.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-5 inline-flex w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      채널 열기
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
         <section className="mt-5 rounded-xl border border-slate-200 bg-white p-6">
           <h2 className="mb-4 text-lg font-semibold">
@@ -552,4 +749,23 @@ function formatAuditValue(
   }
 
   return String(value);
+}
+function getPlatformLabel(
+  platform: string
+) {
+  const labels: Record<
+    string,
+    string
+  > = {
+    instagram: "Instagram",
+    youtube: "YouTube",
+    tiktok: "TikTok",
+    naver_blog: "Naver Blog",
+    xiaohongshu: "Xiaohongshu",
+  };
+
+  return (
+    labels[platform] ||
+    platform
+  );
 }

@@ -19,8 +19,24 @@ export default async function InfluencersPage() {
 
   const { data: influencers, error } = await supabase
     .from("influencers")
-    .select("*")
-    .order("created_at", { ascending: false });
+    .select(`
+      *,
+      channels:influencer_channels (
+        id,
+        influencer_id,
+        platform,
+        channel_name,
+        handle,
+        url,
+        followers,
+        avg_views,
+        is_primary,
+        memo
+      )
+    `)
+    .order("created_at", { 
+      ascending: false 
+    });
 
   if (error) {
     return (

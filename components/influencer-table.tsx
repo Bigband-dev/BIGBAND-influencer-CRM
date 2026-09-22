@@ -1,23 +1,26 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+
 import {
   formatMan,
   formatPriceMan,
 } from "@/lib/format-number";
 
+import PlatformBadge from "@/components/platform-badge";
+
+import type {
+  InfluencerChannel,
+  InfluencerPlatform,
+} from "@/types/influencer";
+
 type Influencer = {
   id: string;
-  name: string | null;
-  instagram_id: string;
-  instagram_url: string | null;
-  email: string | null;
 
-  followers: number | null;
-  avg_views: number | null;
+  name: string | null;
+  email: string | null;
 
   category: string | null;
   subcategory: string | null;
@@ -30,6 +33,20 @@ type Influencer = {
   memo: string | null;
 
   created_at: string | null;
+
+  /*
+   * 새 멀티채널 구조
+   */
+  channels?: InfluencerChannel[];
+
+  /*
+   * 기존 DB 호환용
+   * 새 구조가 안정화될 때까지 유지
+   */
+  instagram_id?: string | null;
+  instagram_url?: string | null;
+  followers?: number | null;
+  avg_views?: number | null;
 };
 
 type SortOption =
@@ -39,6 +56,90 @@ type SortOption =
   | "rate_desc"
   | "recent";
 
+type PlatformFilter =
+  | "all"
+  | InfluencerPlatform;
+
+/*
+ * 대표 채널 찾기
+ *
+ * 1. is_primary=true 우선
+ * 2. 없으면 첫 번째 채널
+ */
+function getPrimaryChannel(
+  influencer: Influencer
+): InfluencerChannel | null {
+  if (
+    influencer.channels &&
+    influencer.channels.length > 0
+  ) {
+    return (
+      influencer.channels.find(
+        (channel) => channel.is_primary
+      ) ??
+      influencer.channels[0]
+    );
+  }
+
+  /*
+   * 기존 Instagram 데이터를 아직
+   * influencer_channels로 옮기지 않은 경우 fallback
+   */
+  if (
+    influencer.instagram_id ||
+    influencer.instagram_url
+  ) {
+    return {
+      platform: "instagram",
+      channel_name: null,
+      handle:
+        influencer.instagram_id ?? null,
+      url:
+        influencer.instagram_url ?? null,
+      followers:
+        influencer.followers ?? null,
+      avg_views:
+        influencer.avg_views ?? null,
+      is_primary: true,
+      memo: null,
+    };
+  }
+
+  return null;
+}
+
+/*
+ * 필터/정렬에서 사용할 대표 팔로워
+ */
+function getFollowers(
+  influencer: Influencer
+) {
+  const primary =
+    getPrimaryChannel(influencer);
+
+  return (
+    primary?.followers ??
+    influencer.followers ??
+    0
+  );
+}
+
+/*
+ * 필터/정렬에서 사용할 대표 평균조회
+ */
+function getAvgViews(
+  influencer: Influencer
+) {
+  const primary =
+    getPrimaryChannel(influencer);
+
+  return (
+    primary?.avg_views ??
+    influencer.avg_views ??
+    0
+  );
+}
+
 export default function InfluencerTable({
   influencers,
 }: {
@@ -47,190 +148,435 @@ export default function InfluencerTable({
   const supabase = createClient();
   const router = useRouter();
 
-  const [search, setSearch] = useState("");
-  const [category, setCategory] = useState("all");
+  const [search, setSearch] =
+    useState("");
 
-  const [minFollowers, setMinFollowers] = useState("");
-  const [maxFollowers, setMaxFollowers] = useState("");
-  const [sort, setSort] = useState<SortOption>("followers_desc");
+  const [category, setCategory] =
+    useState("all");
 
-  const [selectedIds, setSelectedIds] =
+  const [
+    platformFilter,
+    setPlatformFilter,
+  ] =
+    useState<PlatformFilter>("all");
+
+  const [
+    minFollowers,
+    setMinFollowers,
+  ] = useState("");
+
+  const [
+    maxFollowers,
+    setMaxFollowers,
+  ] = useState("");
+
+  const [sort, setSort] =
+    useState<SortOption>(
+      "followers_desc"
+    );
+
+  const [
+    selectedIds,
+    setSelectedIds,
+  ] =
     useState<string[]>([]);
+
   const [deleting, setDeleting] =
     useState(false);
 
+  /*
+   * 카테고리 목록
+   */
   const categories = useMemo(() => {
     const values = influencers
-      .map((item) => item.category)
-      .filter((value): value is string => Boolean(value));
+      .map(
+        (item) =>
+          item.category
+      )
+      .filter(
+        (
+          value
+        ): value is string =>
+          Boolean(value)
+      );
 
-    return [...new Set(values)].sort();
+    return [
+      ...new Set(values),
+    ].sort();
   }, [influencers]);
 
-  const filteredInfluencers = useMemo(() => {
-    const keyword = search.toLowerCase().trim();
+  /*
+   * 검색 + 필터 + 정렬
+   */
+  const filteredInfluencers =
+    useMemo(() => {
+      const keyword =
+        search
+          .toLowerCase()
+          .trim();
 
-    const min = minFollowers ? Number(minFollowers) : null;
-    const max = maxFollowers ? Number(maxFollowers) : null;
+      const min =
+        minFollowers
+          ? Number(
+              minFollowers
+            )
+          : null;
 
-    const result = influencers.filter((influencer) => {
-      const searchMatch =
-        !keyword ||
-        influencer.name?.toLowerCase().includes(keyword) ||
-        influencer.instagram_id?.toLowerCase().includes(keyword) ||
-        influencer.email?.toLowerCase().includes(keyword) ||
-        influencer.category?.toLowerCase().includes(keyword);
+      const max =
+        maxFollowers
+          ? Number(
+              maxFollowers
+            )
+          : null;
 
-      const categoryMatch =
-        category === "all" || influencer.category === category;
+      const result =
+        influencers.filter(
+          (influencer) => {
+            /*
+             * 채널 정보 검색
+             */
+            const channelSearchMatch =
+              influencer.channels?.some(
+                (channel) =>
+                  channel.handle
+                    ?.toLowerCase()
+                    .includes(
+                      keyword
+                    ) ||
+                  channel.channel_name
+                    ?.toLowerCase()
+                    .includes(
+                      keyword
+                    ) ||
+                  channel.platform
+                    .toLowerCase()
+                    .includes(
+                      keyword
+                    )
+              ) ?? false;
 
-      const followers = influencer.followers ?? 0;
+            const searchMatch =
+              !keyword ||
+              influencer.name
+                ?.toLowerCase()
+                .includes(
+                  keyword
+                ) ||
+              influencer.email
+                ?.toLowerCase()
+                .includes(
+                  keyword
+                ) ||
+              influencer.category
+                ?.toLowerCase()
+                .includes(
+                  keyword
+                ) ||
+              influencer.instagram_id
+                ?.toLowerCase()
+                .includes(
+                  keyword
+                ) ||
+              channelSearchMatch;
 
-      const minMatch = min === null || followers >= min;
-      const maxMatch = max === null || followers <= max;
+            const categoryMatch =
+              category === "all" ||
+              influencer.category ===
+                category;
 
-      return (
-        searchMatch &&
-        categoryMatch &&
-        minMatch &&
-        maxMatch
+            /*
+             * 플랫폼 필터
+             */
+            const platformMatch =
+              platformFilter ===
+                "all" ||
+              influencer.channels?.some(
+                (channel) =>
+                  channel.platform ===
+                  platformFilter
+              ) ||
+              (
+                platformFilter ===
+                  "instagram" &&
+                !influencer
+                  .channels
+                  ?.length &&
+                Boolean(
+                  influencer.instagram_id ||
+                    influencer.instagram_url
+                )
+              );
+
+            const followers =
+              getFollowers(
+                influencer
+              );
+
+            const minMatch =
+              min === null ||
+              followers >= min;
+
+            const maxMatch =
+              max === null ||
+              followers <= max;
+
+            return (
+              searchMatch &&
+              categoryMatch &&
+              platformMatch &&
+              minMatch &&
+              maxMatch
+            );
+          }
+        );
+
+      /*
+       * 정렬
+       */
+      result.sort(
+        (a, b) => {
+          switch (sort) {
+            case "followers_desc":
+              return (
+                getFollowers(
+                  b
+                ) -
+                getFollowers(
+                  a
+                )
+              );
+
+            case "followers_asc":
+              return (
+                getFollowers(
+                  a
+                ) -
+                getFollowers(
+                  b
+                )
+              );
+
+            case "views_desc":
+              return (
+                getAvgViews(
+                  b
+                ) -
+                getAvgViews(
+                  a
+                )
+              );
+
+            case "rate_desc":
+              return (
+                (b.collaboration_rate ??
+                  0) -
+                (a.collaboration_rate ??
+                  0)
+              );
+
+            case "recent":
+              return (
+                new Date(
+                  b.created_at ??
+                    0
+                ).getTime() -
+                new Date(
+                  a.created_at ??
+                    0
+                ).getTime()
+              );
+
+            default:
+              return 0;
+          }
+        }
       );
-    });
 
-    result.sort((a, b) => {
-      switch (sort) {
-        case "followers_desc":
-          return (b.followers ?? 0) - (a.followers ?? 0);
+      return result;
+    }, [
+      influencers,
+      search,
+      category,
+      platformFilter,
+      minFollowers,
+      maxFollowers,
+      sort,
+    ]);
 
-        case "followers_asc":
-          return (a.followers ?? 0) - (b.followers ?? 0);
-
-        case "views_desc":
-          return (b.avg_views ?? 0) - (a.avg_views ?? 0);
-
-        case "rate_desc":
-          return (
-            (b.collaboration_rate ?? 0) -
-            (a.collaboration_rate ?? 0)
-          );
-
-        case "recent":
-          return (
-            new Date(b.created_at ?? 0).getTime() -
-            new Date(a.created_at ?? 0).getTime()
-          );
-
-        default:
-          return 0;
-      }
-    });
-
-    return result;
-  }, [
-    influencers,
-    search,
-    category,
-    minFollowers,
-    maxFollowers,
-    sort,
-  ]);
-
+  /*
+   * 필터 초기화
+   */
   const resetFilters = () => {
     setSearch("");
     setCategory("all");
+    setPlatformFilter(
+      "all"
+    );
     setMinFollowers("");
     setMaxFollowers("");
-    setSort("followers_desc");
+    setSort(
+      "followers_desc"
+    );
   };
+
+  /*
+   * 체크박스
+   */
   const allVisibleSelected =
-  filteredInfluencers.length > 0 &&
-  filteredInfluencers.every((item) =>
-    selectedIds.includes(item.id)
-  );
-
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) =>
-      prev.includes(id)
-        ? prev.filter((item) => item !== id)
-        : [...prev, id]
-    );
-  };
-
-  const toggleSelectAll = () => {
-    const visibleIds = filteredInfluencers.map(
-      (item) => item.id
-    );
-
-    if (allVisibleSelected) {
-      setSelectedIds((prev) =>
-        prev.filter(
-          (id) => !visibleIds.includes(id)
+    filteredInfluencers.length >
+      0 &&
+    filteredInfluencers.every(
+      (item) =>
+        selectedIds.includes(
+          item.id
         )
-      );
-    } else {
-      setSelectedIds((prev) => [
-        ...new Set([...prev, ...visibleIds]),
-      ]);
-    }
-  };
+    );
 
-  const handleDeleteOne = async (
-    id: string,
-    name: string
+  const toggleSelect = (
+    id: string
   ) => {
-    const confirmed = window.confirm(
-      `${name} 인플루언서를 삭제하시겠습니까?`
+    setSelectedIds(
+      (prev) =>
+        prev.includes(id)
+          ? prev.filter(
+              (item) =>
+                item !== id
+            )
+          : [
+              ...prev,
+              id,
+            ]
     );
-
-    if (!confirmed) return;
-
-    setDeleting(true);
-
-    const { error } = await supabase
-      .from("influencers")
-      .delete()
-      .eq("id", id);
-
-    setDeleting(false);
-
-    if (error) {
-      alert(`삭제 실패: ${error.message}`);
-      return;
-    }
-
-    setSelectedIds((prev) =>
-      prev.filter((item) => item !== id)
-    );
-
-    router.refresh();
   };
 
-  const handleBulkDelete = async () => {
-    if (selectedIds.length === 0) return;
+  const toggleSelectAll =
+    () => {
+      const visibleIds =
+        filteredInfluencers.map(
+          (item) =>
+            item.id
+        );
 
-    const confirmed = window.confirm(
-      `${selectedIds.length}명의 인플루언서를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`
-    );
+      if (
+        allVisibleSelected
+      ) {
+        setSelectedIds(
+          (prev) =>
+            prev.filter(
+              (id) =>
+                !visibleIds.includes(
+                  id
+                )
+            )
+        );
+      } else {
+        setSelectedIds(
+          (prev) => [
+            ...new Set([
+              ...prev,
+              ...visibleIds,
+            ]),
+          ]
+        );
+      }
+    };
 
-    if (!confirmed) return;
+  /*
+   * 단일 삭제
+   */
+  const handleDeleteOne =
+    async (
+      id: string,
+      name: string
+    ) => {
+      const confirmed =
+        window.confirm(
+          `${name} 인플루언서를 삭제하시겠습니까?`
+        );
 
-    setDeleting(true);
+      if (!confirmed) {
+        return;
+      }
 
-    const { error } = await supabase
-      .from("influencers")
-      .delete()
-      .in("id", selectedIds);
+      setDeleting(true);
 
-    setDeleting(false);
+      const { error } =
+        await supabase
+          .from(
+            "influencers"
+          )
+          .delete()
+          .eq("id", id);
 
-    if (error) {
-      alert(`일괄 삭제 실패: ${error.message}`);
-      return;
-    }
+      setDeleting(false);
 
-    setSelectedIds([]);
-    router.refresh();
-  };
+      if (error) {
+        alert(
+          `삭제 실패: ${error.message}`
+        );
+
+        return;
+      }
+
+      setSelectedIds(
+        (prev) =>
+          prev.filter(
+            (item) =>
+              item !== id
+          )
+      );
+
+      router.refresh();
+    };
+
+  /*
+   * 일괄 삭제
+   */
+  const handleBulkDelete =
+    async () => {
+      if (
+        selectedIds.length ===
+        0
+      ) {
+        return;
+      }
+
+      const confirmed =
+        window.confirm(
+          `${selectedIds.length}명의 인플루언서를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`
+        );
+
+      if (!confirmed) {
+        return;
+      }
+
+      setDeleting(true);
+
+      const { error } =
+        await supabase
+          .from(
+            "influencers"
+          )
+          .delete()
+          .in(
+            "id",
+            selectedIds
+          );
+
+      setDeleting(false);
+
+      if (error) {
+        alert(
+          `일괄 삭제 실패: ${error.message}`
+        );
+
+        return;
+      }
+
+      setSelectedIds([]);
+
+      router.refresh();
+    };
 
   return (
     <div>
@@ -262,12 +608,14 @@ export default function InfluencerTable({
           </p>
 
           <p className="mt-1 text-2xl font-bold text-slate-900">
-            {categories.length}
+            {
+              categories.length
+            }
           </p>
         </div>
       </div>
 
-      {/* 필터 */}
+      {/* 검색 / 필터 */}
       <section className="mb-6 rounded-2xl border border-slate-500 bg-white p-6 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-semibold text-slate-900">
@@ -276,50 +624,131 @@ export default function InfluencerTable({
 
           <button
             type="button"
-            onClick={resetFilters}
+            onClick={
+              resetFilters
+            }
             className="text-sm font-medium text-slate-500 hover:text-slate-900"
           >
             필터 초기화
           </button>
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-5">
+        <div className="grid gap-3 lg:grid-cols-6">
+          {/* 검색 */}
           <input
             type="text"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="이름, Instagram ID, 이메일 검색"
+            onChange={(e) =>
+              setSearch(
+                e.target
+                  .value
+              )
+            }
+            placeholder="이름, 채널 ID, 이메일 검색"
             className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-500 lg:col-span-2"
           />
 
+          {/* 카테고리 */}
           <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
+            value={
+              category
+            }
+            onChange={(e) =>
+              setCategory(
+                e.target
+                  .value
+              )
+            }
             className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900"
           >
             <option value="all">
               전체 카테고리
             </option>
 
-            {categories.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
+            {categories.map(
+              (item) => (
+                <option
+                  key={
+                    item
+                  }
+                  value={
+                    item
+                  }
+                >
+                  {
+                    item
+                  }
+                </option>
+              )
+            )}
           </select>
 
+          {/* 플랫폼 */}
+          <select
+            value={
+              platformFilter
+            }
+            onChange={(e) =>
+              setPlatformFilter(
+                e.target
+                  .value as PlatformFilter
+              )
+            }
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900"
+          >
+            <option value="all">
+              전체 채널
+            </option>
+
+            <option value="instagram">
+              Instagram
+            </option>
+
+            <option value="youtube">
+              YouTube
+            </option>
+
+            <option value="tiktok">
+              TikTok
+            </option>
+
+            <option value="naver_blog">
+              Naver Blog
+            </option>
+
+            <option value="xiaohongshu">
+              Xiaohongshu
+            </option>
+          </select>
+
+          {/* 최소 팔로워 */}
           <input
             type="number"
-            value={minFollowers}
-            onChange={(e) => setMinFollowers(e.target.value)}
+            value={
+              minFollowers
+            }
+            onChange={(e) =>
+              setMinFollowers(
+                e.target
+                  .value
+              )
+            }
             placeholder="최소 팔로워"
             className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400"
           />
 
+          {/* 최대 팔로워 */}
           <input
             type="number"
-            value={maxFollowers}
-            onChange={(e) => setMaxFollowers(e.target.value)}
+            value={
+              maxFollowers
+            }
+            onChange={(e) =>
+              setMaxFollowers(
+                e.target
+                  .value
+              )
+            }
             placeholder="최대 팔로워"
             className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400"
           />
@@ -329,7 +758,10 @@ export default function InfluencerTable({
           <select
             value={sort}
             onChange={(e) =>
-              setSort(e.target.value as SortOption)
+              setSort(
+                e.target
+                  .value as SortOption
+              )
             }
             className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
           >
@@ -355,22 +787,34 @@ export default function InfluencerTable({
           </select>
         </div>
       </section>
-      {selectedIds.length > 0 && (
+
+      {/* 선택 삭제 */}
+      {selectedIds.length >
+        0 && (
         <div className="mb-4 flex items-center justify-between rounded-xl border-2 border-red-400 bg-red-50 px-5 py-4">
           <div>
             <p className="font-semibold text-red-700">
-              {selectedIds.length}명 선택됨
+              {
+                selectedIds.length
+              }
+              명 선택됨
             </p>
 
             <p className="mt-1 text-sm text-red-600">
-              선택한 인플루언서를 한 번에 삭제할 수 있습니다.
+              선택한 인플루언서를
+              한 번에 삭제할
+              수 있습니다.
             </p>
           </div>
 
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setSelectedIds([])}
+              onClick={() =>
+                setSelectedIds(
+                  []
+                )
+              }
               className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
             >
               선택 해제
@@ -378,8 +822,12 @@ export default function InfluencerTable({
 
             <button
               type="button"
-              onClick={handleBulkDelete}
-              disabled={deleting}
+              onClick={
+                handleBulkDelete
+              }
+              disabled={
+                deleting
+              }
               className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
             >
               {deleting
@@ -389,34 +837,44 @@ export default function InfluencerTable({
           </div>
         </div>
       )}
+
       {/* 목록 */}
       <section className="overflow-hidden rounded-2xl border border-slate-500 bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[950px] text-sm">
+          <table className="w-full min-w-[1100px] text-sm">
             <thead className="border-b border-slate-700 bg-slate-100 text-slate-600">
               <tr>
                 <th className="w-12 px-4 py-3 text-center">
                   <input
                     type="checkbox"
-                    checked={allVisibleSelected}
-                    onChange={toggleSelectAll}
+                    checked={
+                      allVisibleSelected
+                    }
+                    onChange={
+                      toggleSelectAll
+                    }
                     className="h-4 w-4 cursor-pointer"
                   />
                 </th>
-                <th className="px-4 py-3 text-left font-medium">
-                  이름
-                </th>
 
                 <th className="px-4 py-3 text-left font-medium">
-                  Instagram
+                  이름
                 </th>
 
                 <th className="px-4 py-3 text-left font-medium">
                   카테고리
                 </th>
 
+                <th className="px-4 py-3 text-left font-medium">
+                  대표 채널
+                </th>
+
+                <th className="px-4 py-3 text-left font-medium">
+                  보유 채널
+                </th>
+
                 <th className="px-4 py-3 text-right font-medium">
-                  팔로워
+                  대표 팔로워
                 </th>
 
                 <th className="px-4 py-3 text-right font-medium">
@@ -428,111 +886,252 @@ export default function InfluencerTable({
                 </th>
 
                 <th className="px-4 py-3 text-center font-medium">
-                  상세
+                  관리
                 </th>
               </tr>
             </thead>
 
             <tbody className="divide-y divide-slate-300">
-              {filteredInfluencers.map((influencer) => (
-                <tr
-                  key={influencer.id}
-                  onClick={() =>
-                    router.push(`/influencers/${influencer.id}`
-                    )
-                  }
-                  className="transition hover:bg-slate-100"
-                >
-                  <td className="w-12 px-4 py-4 text-center">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.includes(
+              {filteredInfluencers.map(
+                (
+                  influencer
+                ) => {
+                  const primaryChannel =
+                    getPrimaryChannel(
+                      influencer
+                    );
+
+                  /*
+                   * 실제 등록된 channels 우선
+                   */
+                  const channels =
+                    influencer.channels &&
+                    influencer
+                      .channels
+                      .length >
+                      0
+                      ? influencer.channels
+                      : primaryChannel
+                      ? [
+                          primaryChannel,
+                        ]
+                      : [];
+
+                  return (
+                    <tr
+                      key={
                         influencer.id
-                      )}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={() =>
-                        toggleSelect(influencer.id)
                       }
-                      className="h-4 w-4 cursor-pointer"
-                    />
-                  </td>
-                  <td className="px-4 py-4">
-                    <div>
-                      <p className="font-semibold text-slate-900">
-                        {influencer.name || "-"}
-                      </p>
-                    </div>
-                  </td>
+                      onClick={() =>
+                        router.push(
+                          `/influencers/${influencer.id}`
+                        )
+                      }
+                      className="cursor-pointer transition hover:bg-slate-100"
+                    >
+                      {/* 체크 */}
+                      <td className="w-12 px-4 py-4 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(
+                            influencer.id
+                          )}
+                          onClick={(
+                            e
+                          ) =>
+                            e.stopPropagation()
+                          }
+                          onChange={() =>
+                            toggleSelect(
+                              influencer.id
+                            )
+                          }
+                          className="h-4 w-4 cursor-pointer"
+                        />
+                      </td>
 
-                  <td className="px-4 py-4 text-slate-700">
-                    {influencer.instagram_url ? (
-                      <a
-                        href={influencer.instagram_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-medium hover:underline"
-                      >
-                        @{influencer.instagram_id}
-                      </a>
-                    ) : (
-                      <>@{influencer.instagram_id}</>
-                    )}
-                  </td>
+                      {/* 이름 */}
+                      <td className="px-4 py-4">
+                        <div>
+                          <p className="font-semibold text-slate-900">
+                            {influencer.name ||
+                              "-"}
+                          </p>
 
-                  <td className="px-4 py-4">
-                    {influencer.category ? (
-                      <span className="inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
-                        {influencer.category}
-                      </span>
-                    ) : (
-                      "-"
-                    )}
-                  </td>
+                          {influencer.email && (
+                            <p className="mt-1 text-xs text-slate-400">
+                              {
+                                influencer.email
+                              }
+                            </p>
+                          )}
+                        </div>
+                      </td>
 
-                  <td className="px-4 py-4 text-right text-slate-700">
-                    {formatMan(influencer.followers)}
-                  </td>
+                      {/* 카테고리 */}
+                      <td className="px-4 py-4">
+                        {influencer.category ? (
+                          <span className="inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+                            {
+                              influencer.category
+                            }
+                          </span>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
 
-                  <td className="px-4 py-4 text-right text-slate-700">
-                    {formatMan(influencer.avg_views)}
-                  </td>
+                      {/* 대표 채널 */}
+                      <td className="px-4 py-4">
+                        {primaryChannel ? (
+                          <div className="space-y-1.5">
+                            <PlatformBadge
+                              platform={
+                                primaryChannel.platform
+                              }
+                            />
 
-                  <td className="px-4 py-4 text-right text-slate-700">
-                    {formatPriceMan(influencer.collaboration_rate)}
-                  </td>
+                            {primaryChannel.url ? (
+                              <div>
+                                <a
+                                  href={
+                                    primaryChannel.url
+                                  }
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(
+                                    e
+                                  ) =>
+                                    e.stopPropagation()
+                                  }
+                                  className="text-xs font-medium text-slate-600 hover:text-slate-900 hover:underline"
+                                >
+                                  {primaryChannel.handle
+                                    ? `@${primaryChannel.handle}`
+                                    : primaryChannel.channel_name ||
+                                      "채널 열기"}
+                                </a>
+                              </div>
+                            ) : primaryChannel.handle ? (
+                              <p className="text-xs text-slate-500">
+                                @
+                                {
+                                  primaryChannel.handle
+                                }
+                              </p>
+                            ) : primaryChannel.channel_name ? (
+                              <p className="text-xs text-slate-500">
+                                {
+                                  primaryChannel.channel_name
+                                }
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="text-slate-400">
+                            -
+                          </span>
+                        )}
+                      </td>
 
-                  <td className="px-4 py-4">
-                    <div className="flex justify-center gap-2">
-                      
+                      {/* 보유 채널 */}
+                      <td className="px-4 py-4">
+                        {channels.length >
+                        0 ? (
+                          <div className="flex max-w-[240px] flex-wrap gap-1.5">
+                            {channels.map(
+                              (
+                                channel,
+                                index
+                              ) => (
+                                <PlatformBadge
+                                  key={
+                                    channel.id ??
+                                    `${influencer.id}-${channel.platform}-${channel.handle ?? index}`
+                                  }
+                                  platform={
+                                    channel.platform
+                                  }
+                                  compact
+                                />
+                              )
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-slate-400">
+                            -
+                          </span>
+                        )}
+                      </td>
 
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
+                      {/* 팔로워 */}
+                      <td className="px-4 py-4 text-right font-medium text-slate-700">
+                        {formatMan(
+                          primaryChannel?.followers ??
+                            influencer.followers ??
+                            null
+                        )}
+                      </td>
 
-                          handleDeleteOne(
-                            influencer.id,
-                            influencer.name ||
-                              `@${influencer.instagram_id}`
-                          );
-                        }}
-                        disabled={deleting}
-                        className="rounded-lg border-2 border-red-400 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
-                      >
-                        삭제
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                      {/* 평균 조회 */}
+                      <td className="px-4 py-4 text-right text-slate-700">
+                        {formatMan(
+                          primaryChannel?.avg_views ??
+                            influencer.avg_views ??
+                            null
+                        )}
+                      </td>
 
-              {filteredInfluencers.length === 0 && (
+                      {/* 협업 단가 */}
+                      <td className="px-4 py-4 text-right text-slate-700">
+                        {formatPriceMan(
+                          influencer.collaboration_rate
+                        )}
+                      </td>
+
+                      {/* 관리 */}
+                      <td className="px-4 py-4">
+                        <div className="flex justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={(
+                              e
+                            ) => {
+                              e.stopPropagation();
+
+                              handleDeleteOne(
+                                influencer.id,
+                                influencer.name ||
+                                  primaryChannel?.handle ||
+                                  "인플루언서"
+                              );
+                            }}
+                            disabled={
+                              deleting
+                            }
+                            className="rounded-lg border-2 border-red-400 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+              )}
+
+              {filteredInfluencers.length ===
+                0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={
+                      9
+                    }
                     className="px-4 py-16 text-center text-slate-400"
                   >
-                    조건에 맞는 인플루언서가 없습니다.
+                    조건에 맞는
+                    인플루언서가
+                    없습니다.
                   </td>
                 </tr>
               )}
