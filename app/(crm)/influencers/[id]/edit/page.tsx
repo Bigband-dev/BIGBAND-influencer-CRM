@@ -89,17 +89,9 @@ export default async function EditInfluencerPage({
         </Link>
 
         <div className="mb-8 mt-5">
-          <p className="text-sm font-medium text-slate-500">
-            Influencer Management
-          </p>
-
           <h1 className="mt-1 text-3xl font-bold">
             인플루언서 수정
           </h1>
-
-          <p className="mt-2 text-sm text-slate-500">
-            기본 정보와 SNS / 콘텐츠 채널을 수정할 수 있습니다.
-          </p>
         </div>
 
         <InfluencerForm
