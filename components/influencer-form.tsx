@@ -1,33 +1,28 @@
 "use client";
-
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-
 import type {
   InfluencerChannel,
   InfluencerPlatform,
 } from "@/types/influencer";
+import {
+  INFLUENCER_CATEGORIES,
+} from "@/lib/influencer-categories";
 
 type InfluencerFormValues = {
   id?: string;
-
   name?: string | null;
   email?: string | null;
   phone?: string | null;
-
   category?: string | null;
+  categories?: string[] | null;
   subcategory?: string | null;
-
   gender?: string | null;
   age_group?: string | null;
-
   collaboration_rate?: number | null;
-
   memo?: string | null;
-
   channels?: InfluencerChannel[];
-
   /*
    * 기존 DB 호환용
    * 완전히 멀티채널 구조로 이전한 뒤 제거 가능
@@ -40,18 +35,14 @@ type InfluencerFormValues = {
 
 type ChannelFormValue = {
   id?: string;
-
   platform: InfluencerPlatform;
-
   channel_name: string;
   handle: string;
   url: string;
-
   followers: string;
   avg_views: string;
-
+  collaboration_rate: string;
   is_primary: boolean;
-
   memo: string;
 };
 
@@ -86,31 +77,27 @@ function channelToFormValue(
 ): ChannelFormValue {
   return {
     id: channel.id,
-
     platform: channel.platform,
-
     channel_name:
       channel.channel_name ?? "",
-
     handle:
       channel.handle ?? "",
-
     url:
       channel.url ?? "",
-
     followers:
       channel.followers != null
         ? String(channel.followers)
         : "",
-
     avg_views:
       channel.avg_views != null
         ? String(channel.avg_views)
         : "",
-
+    collaboration_rate:
+      channel.collaboration_rate != null
+        ? String(channel.collaboration_rate)
+        : "",
     is_primary:
       channel.is_primary,
-
     memo:
       channel.memo ?? "",
   };
@@ -121,16 +108,13 @@ function createEmptyChannel(
 ): ChannelFormValue {
   return {
     platform: "instagram",
-
     channel_name: "",
     handle: "",
     url: "",
-
     followers: "",
     avg_views: "",
-
+    collaboration_rate: "",
     is_primary: isPrimary,
-
     memo: "",
   };
 }
@@ -143,10 +127,8 @@ export default function InfluencerForm({
   const router = useRouter();
   const supabase =
     createClient();
-
   const isEdit =
     Boolean(initialData?.id);
-
   /*
    * 기본 정보
    */
@@ -154,34 +136,27 @@ export default function InfluencerForm({
     useState({
       name:
         initialData?.name ?? "",
-
       email:
         initialData?.email ?? "",
-
       phone:
         initialData?.phone ?? "",
-
-      category:
-        initialData?.category ?? "",
-
       subcategory:
         initialData?.subcategory ?? "",
-
       gender:
         initialData?.gender ?? "",
-
       age_group:
         initialData?.age_group ?? "",
-
-      collaboration_rate:
-        initialData
-          ?.collaboration_rate
-          ?.toString() ?? "",
-
       memo:
         initialData?.memo ?? "",
     });
-
+  const [selectedCategories, setSelectedCategories] =
+    useState<string[]>(
+      initialData?.categories?.length
+        ? initialData.categories
+        : initialData?.category
+          ? [initialData.category]
+          : []
+    );
   /*
    * 기존 channels가 있으면 사용.
    *
@@ -200,22 +175,17 @@ export default function InfluencerForm({
         ? [
             {
               id: undefined,
-
               platform:
                 "instagram",
-
               channel_name: "",
-
               handle:
                 initialData
                   ?.instagram_id ??
                 "",
-
               url:
                 initialData
                   ?.instagram_url ??
                 "",
-
               followers:
                 initialData
                   ?.followers != null
@@ -223,7 +193,6 @@ export default function InfluencerForm({
                       initialData.followers
                     )
                   : "",
-
               avg_views:
                 initialData
                   ?.avg_views != null
@@ -231,9 +200,14 @@ export default function InfluencerForm({
                       initialData.avg_views
                     )
                   : "",
-
+              collaboration_rate:
+                initialData
+                  ?.collaboration_rate != null
+                  ? String(
+                      initialData.collaboration_rate
+                    )
+                  : "",
               is_primary: true,
-
               memo: "",
             },
           ]
@@ -242,7 +216,6 @@ export default function InfluencerForm({
               true
             ),
           ];
-
   const [
     channels,
     setChannels,
@@ -250,17 +223,14 @@ export default function InfluencerForm({
     useState<ChannelFormValue[]>(
       initialChannels
     );
-
   const [
     saving,
     setSaving,
   ] = useState(false);
-
   const [
     errorMessage,
     setErrorMessage,
   ] = useState("");
-
   /*
    * 기본 정보 변경
    */
@@ -273,7 +243,17 @@ export default function InfluencerForm({
       [key]: value,
     }));
   };
-
+  const toggleCategory = (
+    category: string
+  ) => {
+    setSelectedCategories((prev) =>
+      prev.includes(category)
+        ? prev.filter(
+            (item) => item !== category
+          )
+        : [...prev, category]
+    );
+  };
   /*
    * 채널 필드 변경
    */
@@ -299,7 +279,6 @@ export default function InfluencerForm({
       )
     );
   };
-
   /*
    * 채널 추가
    */
@@ -311,7 +290,6 @@ export default function InfluencerForm({
       ),
     ]);
   };
-
   /*
    * 채널 삭제
    */
@@ -321,13 +299,11 @@ export default function InfluencerForm({
     setChannels((prev) => {
       const removed =
         prev[index];
-
       const next =
         prev.filter(
           (_, i) =>
             i !== index
         );
-
       /*
        * 대표 채널을 삭제했다면
        * 남은 첫 번째 채널을 대표로 지정
@@ -341,11 +317,9 @@ export default function InfluencerForm({
           is_primary: true,
         };
       }
-
       return next;
     });
   };
-
   /*
    * 대표 채널 설정
    *
@@ -364,7 +338,6 @@ export default function InfluencerForm({
       )
     );
   };
-
   /*
    * 저장
    */
@@ -372,9 +345,7 @@ export default function InfluencerForm({
     e: React.FormEvent
   ) => {
     e.preventDefault();
-
     setErrorMessage("");
-
     /*
      * 최소 한 개 채널 필요
      */
@@ -386,7 +357,6 @@ export default function InfluencerForm({
       );
       return;
     }
-
     /*
      * 각 채널은 이름 / ID / URL 중
      * 최소 하나는 있어야 함
@@ -398,14 +368,12 @@ export default function InfluencerForm({
           !channel.handle.trim() &&
           !channel.url.trim()
       );
-
     if (invalidChannel) {
       setErrorMessage(
         "각 채널에는 채널명, ID 또는 URL 중 하나 이상을 입력해주세요."
       );
       return;
     }
-
     /*
      * 대표 채널 확인
      */
@@ -420,9 +388,7 @@ export default function InfluencerForm({
       );
       return;
     }
-
     setSaving(true);
-
     try {
       /*
        * 기존 구조 호환용.
@@ -436,47 +402,42 @@ export default function InfluencerForm({
             channel.platform ===
             "instagram"
         );
-
+      const selectedPrimaryChannel = channels.find(
+        (channel) => channel.is_primary
+      );
       const influencerPayload = {
         name:
           form.name.trim() ||
           null,
-
         email:
           form.email.trim() ||
           null,
-
         phone:
           form.phone.trim() ||
           null,
-
         category:
-          form.category.trim() ||
-          null,
-
+          selectedCategories.length > 0
+            ? selectedCategories[0]
+            : null,
+        categories:
+          selectedCategories.length > 0
+            ? selectedCategories
+            : null,
         subcategory:
           form.subcategory.trim() ||
           null,
-
         gender:
           form.gender.trim() ||
           null,
-
         age_group:
           form.age_group.trim() ||
           null,
-
-        collaboration_rate:
-          form.collaboration_rate
-            ? Number(
-                form.collaboration_rate
-              )
-            : null,
-
+        collaboration_rate: selectedPrimaryChannel?.collaboration_rate
+          ? Number(selectedPrimaryChannel.collaboration_rate)
+          : null,
         memo:
           form.memo.trim() ||
           null,
-
         /*
          * 레거시 컬럼 동기화
          */
@@ -488,13 +449,11 @@ export default function InfluencerForm({
               /^@/,
               ""
             ) || null,
-
         instagram_url:
           instagramChannel
             ?.url
             .trim() ||
           null,
-
         followers:
           instagramChannel
             ?.followers
@@ -502,7 +461,6 @@ export default function InfluencerForm({
                 instagramChannel.followers
               )
             : null,
-
         avg_views:
           instagramChannel
             ?.avg_views
@@ -510,14 +468,11 @@ export default function InfluencerForm({
                 instagramChannel.avg_views
               )
             : null,
-
         updated_at:
           new Date().toISOString(),
       };
-
       let influencerId:
         string;
-
       /*
        * 1. influencer 기본 정보 저장
        */
@@ -539,11 +494,9 @@ export default function InfluencerForm({
               "id",
               initialData.id
             );
-
         if (error) {
           throw error;
         }
-
         influencerId =
           initialData.id;
       } else {
@@ -560,21 +513,17 @@ export default function InfluencerForm({
             )
             .select("id")
             .single();
-
         if (error) {
           throw error;
         }
-
         if (!data?.id) {
           throw new Error(
             "인플루언서 ID를 생성하지 못했습니다."
           );
         }
-
         influencerId =
           data.id;
       }
-
       /*
        * 2. 기존 DB 채널 ID 확인
        */
@@ -594,7 +543,6 @@ export default function InfluencerForm({
             ): id is string =>
               Boolean(id)
           );
-
       const currentChannelIds =
         channels
           .map(
@@ -607,7 +555,6 @@ export default function InfluencerForm({
             ): id is string =>
               Boolean(id)
           );
-
       /*
        * 폼에서 삭제된 기존 채널
        */
@@ -618,7 +565,6 @@ export default function InfluencerForm({
               id
             )
         );
-
       if (
         removedChannelIds.length >
         0
@@ -636,12 +582,10 @@ export default function InfluencerForm({
               "id",
               removedChannelIds
             );
-
         if (deleteError) {
           throw deleteError;
         }
       }
-
       /*
        * unique primary index 충돌 방지를 위해
        * 현재 모든 채널의 대표 상태를 먼저 해제
@@ -662,13 +606,11 @@ export default function InfluencerForm({
             "influencer_id",
             influencerId
           );
-
       if (
         clearPrimaryError
       ) {
         throw clearPrimaryError;
       }
-
       /*
        * 대표 채널 index
        */
@@ -677,11 +619,9 @@ export default function InfluencerForm({
           (channel) =>
             channel.is_primary
         );
-
       let primaryChannelId:
         string | null =
         null;
-
       /*
        * 3. 채널 각각 update / insert
        */
@@ -693,19 +633,15 @@ export default function InfluencerForm({
       ) {
         const channel =
           channels[index];
-
         const channelPayload = {
           influencer_id:
             influencerId,
-
           platform:
             channel.platform,
-
           channel_name:
             channel.channel_name
               .trim() ||
             null,
-
           handle:
             channel.handle
               .trim()
@@ -714,41 +650,37 @@ export default function InfluencerForm({
                 ""
               ) ||
             null,
-
           url:
             channel.url
               .trim() ||
             null,
-
           followers:
             channel.followers
               ? Number(
                   channel.followers
                 )
               : null,
-
           avg_views:
             channel.avg_views
               ? Number(
                   channel.avg_views
                 )
               : null,
-
+          collaboration_rate: channel.collaboration_rate
+            ? Number(channel.collaboration_rate)
+            : null,
           /*
            * 마지막 단계에서
            * 대표 채널만 true로 변경
            */
           is_primary: false,
-
           memo:
             channel.memo
               .trim() ||
             null,
-
           updated_at:
             new Date().toISOString(),
         };
-
         if (channel.id) {
           /*
            * 기존 채널 수정
@@ -768,11 +700,9 @@ export default function InfluencerForm({
                 "id",
                 channel.id
               );
-
           if (updateError) {
             throw updateError;
           }
-
           if (
             index ===
             primaryIndex
@@ -792,7 +722,6 @@ export default function InfluencerForm({
             .insert(channelPayload)
             .select("id")
             .single();
-
           if (insertError) {
             console.error(
               "CHANNEL INSERT ERROR",
@@ -801,10 +730,8 @@ export default function InfluencerForm({
                 insertError,
               }
             );
-
             throw insertError;
           }
-
           if (
             index ===
             primaryIndex
@@ -814,7 +741,6 @@ export default function InfluencerForm({
           }
         }
       }
-
       /*
        * 4. 대표 채널 지정
        */
@@ -837,14 +763,12 @@ export default function InfluencerForm({
               "id",
               primaryChannelId
             );
-
         if (
           primaryError
         ) {
           throw primaryError;
         }
       }
-
       /*
        * 완료 후
        * 신규 등록 -> 목록
@@ -859,7 +783,6 @@ export default function InfluencerForm({
           "/influencers"
         );
       }
-
       router.refresh();
     } catch (error: any) {
       console.error(
@@ -872,12 +795,10 @@ export default function InfluencerForm({
           error,
         }
       );
-
       const message =
         error?.message ||
         error?.details ||
         "저장 중 오류가 발생했습니다.";
-
       if (
         message.includes(
           "duplicate key value"
@@ -893,7 +814,6 @@ export default function InfluencerForm({
       setSaving(false);
     }
   };
-
   return (
     <form
       onSubmit={
@@ -906,7 +826,6 @@ export default function InfluencerForm({
         <h2 className="mb-5 text-lg font-semibold">
           기본 정보
         </h2>
-
         <div className="grid gap-5 md:grid-cols-2">
           <Field
             label="이름"
@@ -922,7 +841,6 @@ export default function InfluencerForm({
               )
             }
           />
-
           <Field
             label="이메일"
             value={
@@ -937,7 +855,6 @@ export default function InfluencerForm({
               )
             }
           />
-
           <Field
             label="전화번호"
             value={
@@ -952,7 +869,6 @@ export default function InfluencerForm({
               )
             }
           />
-
           <Field
             label="성별"
             value={
@@ -967,7 +883,6 @@ export default function InfluencerForm({
               )
             }
           />
-
           <Field
             label="연령대"
             value={
@@ -983,56 +898,49 @@ export default function InfluencerForm({
             }
             placeholder="20대, 30대 등"
           />
-
-          <Field
-            label="카테고리"
-            value={
-              form.category
-            }
-            onChange={(
-              value
-            ) =>
-              updateField(
-                "category",
-                value
-              )
-            }
-          />
-
+          <div className="md:col-span-2">
+            <label className="mb-3 block text-sm font-medium text-slate-700">
+              카테고리
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {INFLUENCER_CATEGORIES.map((category) => {
+                const selected =
+                  selectedCategories.includes(category);
+                return (
+                  <button
+                    key={category}
+                    type="button"
+                    onClick={() =>
+                      toggleCategory(category)
+                    }
+                    className={`rounded-full border px-3 py-2 text-sm font-medium transition ${
+                      selected
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    {category}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              여러 카테고리를 선택할 수 있습니다.
+            </p>
+          </div>
           <Field
             label="세부 카테고리"
-            value={
-              form.subcategory
-            }
-            onChange={(
-              value
-            ) =>
+            value={form.subcategory}
+            onChange={(value) =>
               updateField(
                 "subcategory",
                 value
               )
             }
-          />
-
-          <Field
-            label="최근 협업 단가"
-            type="number"
-            value={
-              form.collaboration_rate
-            }
-            onChange={(
-              value
-            ) =>
-              updateField(
-                "collaboration_rate",
-                value
-              )
-            }
-            placeholder="만원 단위"
+            placeholder="필요한 경우 입력"
           />
         </div>
       </section>
-
       {/* 채널 정보 */}
       <section className="rounded-xl border border-slate-300 bg-white p-6">
         <div className="mb-5 flex items-center justify-between">
@@ -1040,7 +948,6 @@ export default function InfluencerForm({
             <h2 className="text-lg font-semibold">
               채널 정보
             </h2>
-
             <p className="mt-1 text-sm text-slate-500">
               Instagram,
               YouTube, TikTok,
@@ -1049,7 +956,6 @@ export default function InfluencerForm({
               있습니다.
             </p>
           </div>
-
           <button
             type="button"
             onClick={
@@ -1060,7 +966,6 @@ export default function InfluencerForm({
             + 채널 추가
           </button>
         </div>
-
         {channels.length ===
           0 ? (
           <div className="rounded-xl border border-dashed border-slate-300 py-10 text-center">
@@ -1068,7 +973,6 @@ export default function InfluencerForm({
               등록된 채널이
               없습니다.
             </p>
-
             <button
               type="button"
               onClick={
@@ -1105,14 +1009,12 @@ export default function InfluencerForm({
                         {index +
                           1}
                       </span>
-
                       {channel.is_primary && (
                         <span className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white">
                           대표 채널
                         </span>
                       )}
                     </div>
-
                     <div className="flex items-center gap-2">
                       <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
                         <input
@@ -1128,10 +1030,8 @@ export default function InfluencerForm({
                           }
                           className="h-4 w-4"
                         />
-
                         대표 채널
                       </label>
-
                       <button
                         type="button"
                         onClick={() =>
@@ -1145,14 +1045,12 @@ export default function InfluencerForm({
                       </button>
                     </div>
                   </div>
-
                   <div className="grid gap-5 md:grid-cols-2">
                     {/* 플랫폼 */}
                     <div>
                       <label className="mb-2 block text-sm font-medium text-slate-700">
                         플랫폼
                       </label>
-
                       <select
                         value={
                           channel.platform
@@ -1190,7 +1088,6 @@ export default function InfluencerForm({
                         )}
                       </select>
                     </div>
-
                     <Field
                       label="채널명"
                       value={
@@ -1207,7 +1104,6 @@ export default function InfluencerForm({
                       }
                       placeholder="예: 민지로그"
                     />
-
                     <Field
                       label="채널 ID / 핸들"
                       value={
@@ -1224,7 +1120,6 @@ export default function InfluencerForm({
                       }
                       placeholder="@ 없이 입력"
                     />
-
                     <Field
                       label="채널 URL"
                       value={
@@ -1241,7 +1136,6 @@ export default function InfluencerForm({
                       }
                       placeholder="https://..."
                     />
-
                     <Field
                       label="팔로워 (명)"
                       type="number"
@@ -1258,7 +1152,6 @@ export default function InfluencerForm({
                         )
                       }
                     />
-
                     <Field
                       label="평균 조회수 (회)"
                       type="number"
@@ -1275,13 +1168,20 @@ export default function InfluencerForm({
                         )
                       }
                     />
+                    <Field
+                      label="최근 협업 단가 (만원)"
+                      type="number"
+                      value={channel.collaboration_rate}
+                      onChange={(value) =>
+                        updateChannel(index, "collaboration_rate", value)
+                      }
+                      placeholder="예: 150"
+                    />
                   </div>
-
                   <div className="mt-5">
                     <label className="mb-2 block text-sm font-medium text-slate-700">
                       채널 메모
                     </label>
-
                     <textarea
                       value={
                         channel.memo
@@ -1310,13 +1210,11 @@ export default function InfluencerForm({
           </div>
         )}
       </section>
-
       {/* 내부 메모 */}
       <section className="rounded-xl border border-slate-300 bg-white p-6">
         <h2 className="mb-5 text-lg font-semibold">
           내부 메모
         </h2>
-
         <textarea
           value={
             form.memo
@@ -1332,7 +1230,6 @@ export default function InfluencerForm({
           placeholder="인플루언서 관련 내부 메모"
         />
       </section>
-
       {/* 에러 */}
       {errorMessage && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -1341,7 +1238,6 @@ export default function InfluencerForm({
           }
         </div>
       )}
-
       {/* 하단 버튼 */}
       <div className="flex justify-end gap-3">
         <button
@@ -1356,7 +1252,6 @@ export default function InfluencerForm({
         >
           취소
         </button>
-
         <button
           type="submit"
           disabled={
@@ -1383,15 +1278,11 @@ function Field({
   placeholder,
 }: {
   label: string;
-
   value: string;
-
   onChange: (
     value: string
   ) => void;
-
   type?: string;
-
   placeholder?: string;
 }) {
   return (
@@ -1399,7 +1290,6 @@ function Field({
       <label className="mb-2 block text-sm font-medium text-slate-700">
         {label}
       </label>
-
       <input
         type={type}
         value={value}

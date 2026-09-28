@@ -23,6 +23,7 @@ type Influencer = {
   email: string | null;
 
   category: string | null;
+  categories?: string[] | null;
   subcategory: string | null;
 
   gender: string | null;
@@ -101,6 +102,8 @@ function getPrimaryChannel(
       avg_views:
         influencer.avg_views ?? null,
       is_primary: true,
+      collaboration_rate:
+        influencer.collaboration_rate ?? null,
       memo: null,
     };
   }
@@ -138,6 +141,11 @@ function getAvgViews(
     influencer.avg_views ??
     0
   );
+}
+
+function getCollaborationRate(influencer: Influencer) {
+  const primary = getPrimaryChannel(influencer);
+  return primary?.collaboration_rate ?? influencer.collaboration_rate ?? 0;
 }
 
 export default function InfluencerTable({
@@ -188,17 +196,14 @@ export default function InfluencerTable({
    * 카테고리 목록
    */
   const categories = useMemo(() => {
-    const values = influencers
-      .map(
-        (item) =>
-          item.category
-      )
-      .filter(
-        (
-          value
-        ): value is string =>
-          Boolean(value)
-      );
+    const values = influencers.flatMap(
+      (item) =>
+        item.categories?.length
+          ? item.categories
+          : item.category
+            ? [item.category]
+            : []
+    );
 
     return [
       ...new Set(values),
@@ -255,6 +260,21 @@ export default function InfluencerTable({
                     )
               ) ?? false;
 
+            const influencerCategories =
+              influencer.categories?.length
+                ? influencer.categories
+                : influencer.category
+                  ? [influencer.category]
+                  : [];
+
+            const categorySearchMatch =
+              influencerCategories.some(
+                (item) =>
+                  item
+                    .toLowerCase()
+                    .includes(keyword)
+              );
+
             const searchMatch =
               !keyword ||
               influencer.name
@@ -267,11 +287,7 @@ export default function InfluencerTable({
                 .includes(
                   keyword
                 ) ||
-              influencer.category
-                ?.toLowerCase()
-                .includes(
-                  keyword
-                ) ||
+              categorySearchMatch ||
               influencer.instagram_id
                 ?.toLowerCase()
                 .includes(
@@ -281,8 +297,9 @@ export default function InfluencerTable({
 
             const categoryMatch =
               category === "all" ||
-              influencer.category ===
-                category;
+              influencerCategories.includes(
+                category
+              );
 
             /*
              * 플랫폼 필터
@@ -367,12 +384,7 @@ export default function InfluencerTable({
               );
 
             case "rate_desc":
-              return (
-                (b.collaboration_rate ??
-                  0) -
-                (a.collaboration_rate ??
-                  0)
-              );
+              return getCollaborationRate(b) - getCollaborationRate(a);
 
             case "recent":
               return (
@@ -882,7 +894,7 @@ export default function InfluencerTable({
                 </th>
 
                 <th className="px-4 py-3 text-right font-medium">
-                  협업 단가
+                  대표 채널 단가
                 </th>
 
                 <th className="px-4 py-3 text-center font-medium">
@@ -970,12 +982,29 @@ export default function InfluencerTable({
 
                       {/* 카테고리 */}
                       <td className="px-4 py-4">
-                        {influencer.category ? (
-                          <span className="inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
-                            {
-                              influencer.category
-                            }
-                          </span>
+                        {(
+                          influencer.categories?.length
+                            ? influencer.categories
+                            : influencer.category
+                              ? [influencer.category]
+                              : []
+                        ).length > 0 ? (
+                          <div className="flex max-w-[280px] flex-wrap gap-1.5">
+                            {(
+                              influencer.categories?.length
+                                ? influencer.categories
+                                : influencer.category
+                                  ? [influencer.category]
+                                  : []
+                            ).map((category) => (
+                              <span
+                                key={category}
+                                className="rounded-full border border-slate-300 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700"
+                              >
+                                {category}
+                              </span>
+                            ))}
+                          </div>
                         ) : (
                           "-"
                         )}
@@ -1084,9 +1113,7 @@ export default function InfluencerTable({
 
                       {/* 협업 단가 */}
                       <td className="px-4 py-4 text-right text-slate-700">
-                        {formatPriceMan(
-                          influencer.collaboration_rate
-                        )}
+                        {formatPriceMan(primaryChannel?.collaboration_rate ?? influencer.collaboration_rate)}
                       </td>
 
                       {/* 관리 */}

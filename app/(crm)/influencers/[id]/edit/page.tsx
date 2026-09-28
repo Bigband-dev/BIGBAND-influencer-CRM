@@ -44,6 +44,7 @@ export default async function EditInfluencerPage({
           url,
           followers,
           avg_views,
+          collaboration_rate,
           is_primary,
           memo
         )

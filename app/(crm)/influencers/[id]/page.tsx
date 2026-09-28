@@ -23,7 +23,6 @@ import type {
   InfluencerChannel,
 } from "@/types/influencer";
 
-
 export const instant = false;
 
 export default async function InfluencerDetailPage({
@@ -56,6 +55,7 @@ export default async function InfluencerDetailPage({
         url,
         followers,
         avg_views,
+        collaboration_rate,
         is_primary,
         memo
       )
@@ -76,6 +76,13 @@ export default async function InfluencerDetailPage({
     ) ??
     channels[0] ??
     null;
+
+  const categories: string[] =
+    influencer.categories?.length
+      ? influencer.categories
+      : influencer.category
+        ? [influencer.category]
+        : [];
 
   const { data: campaignHistory } =
     await supabase
@@ -270,10 +277,28 @@ export default async function InfluencerDetailPage({
                 value={influencer.email}
               />
 
-              <Info
-                label="카테고리"
-                value={influencer.category}
-              />
+              <div className="border-b border-slate-100 pb-3">
+                <div className="mb-2 text-slate-500">
+                  카테고리
+                </div>
+
+                {categories.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {categories.map((category) => (
+                      <span
+                        key={category}
+                        className="rounded-full border border-slate-300 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700"
+                      >
+                        {category}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-slate-400">
+                    -
+                  </span>
+                )}
+              </div>
 
               <Info
                 label="세부 카테고리"
@@ -300,10 +325,15 @@ export default async function InfluencerDetailPage({
 
             <div className="space-y-4 text-sm">
               <Info
-                label="최근 협업 단가"
-                value={formatPriceMan(
-                  influencer.collaboration_rate
-                )}
+                label="대표 채널 단가"
+                value={
+                  primaryChannel
+                    ? formatPriceMan(
+                        primaryChannel.collaboration_rate ??
+                          influencer.collaboration_rate
+                      )
+                    : formatPriceMan(influencer.collaboration_rate)
+                }
               />
 
               <Info
@@ -401,28 +431,23 @@ export default async function InfluencerDetailPage({
                   </div>
 
                   {/* 지표 */}
-                  <div className="mt-5 grid grid-cols-2 gap-4">
+                  <div className="mt-5 grid grid-cols-3 gap-4">
                     <div>
-                      <p className="text-xs text-slate-500">
-                        팔로워 / 구독자
-                      </p>
-
+                      <p className="text-xs text-slate-500">팔로워 / 구독자</p>
                       <p className="mt-1 font-semibold text-slate-900">
-                        {formatMan(
-                          channel.followers
-                        )}
+                        {formatMan(channel.followers)}
                       </p>
                     </div>
-
                     <div>
-                      <p className="text-xs text-slate-500">
-                        평균 조회수
-                      </p>
-
+                      <p className="text-xs text-slate-500">평균 조회수</p>
                       <p className="mt-1 font-semibold text-slate-900">
-                        {formatMan(
-                          channel.avg_views
-                        )}
+                        {formatMan(channel.avg_views)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500">최근 협업 단가</p>
+                      <p className="mt-1 font-semibold text-slate-900">
+                        {formatPriceMan(channel.collaboration_rate)}
                       </p>
                     </div>
                   </div>
@@ -549,7 +574,7 @@ export default async function InfluencerDetailPage({
               )}
             </div>
           )}
-          
+
         </section>
 
         <section className="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white">
@@ -701,7 +726,8 @@ function getChangedFields(
     phone: "전화번호",
     followers: "팔로워",
     avg_views: "평균 조회수",
-    category: "카테고리",
+    category: "대표 카테고리",
+    categories: "카테고리",
     subcategory: "세부 카테고리",
     gender: "성별",
     age_group: "연령대",
@@ -733,6 +759,15 @@ function formatAuditValue(
     value === ""
   ) {
     return "없음";
+  }
+
+  if (
+    key === "categories" &&
+    Array.isArray(value)
+  ) {
+    return value.length > 0
+      ? value.join(", ")
+      : "없음";
   }
 
   if (

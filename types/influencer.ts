@@ -22,6 +22,8 @@ export type InfluencerChannel = {
 
   avg_views: number | null;
 
+  collaboration_rate: number | null;
+
   is_primary: boolean;
 
   memo?: string | null;
@@ -36,11 +38,15 @@ export type Influencer = {
 
   category: string | null;
 
+  categories?: string[] | null;
+
   subcategory: string | null;
 
   gender: string | null;
 
   age_group: string | null;
+
+  collaboration_rate: number | null;
 
   memo: string | null;
 
