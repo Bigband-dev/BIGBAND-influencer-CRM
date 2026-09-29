@@ -1,47 +1,42 @@
 import Link from "next/link";
-
 import {
   notFound,
   redirect,
 } from "next/navigation";
-
 import { createClient } from "@/lib/supabase/server";
 import DeleteInfluencerButton from "@/components/delete-influencer-button";
 import {
   formatMan,
   formatPriceMan,
 } from "@/lib/format-number";
-
 import {
   getCampaignInfluencerStatusLabel,
   getCampaignInfluencerStatusClass,
 } from "@/lib/campaign-status";
-
 import PlatformBadge from "@/components/platform-badge";
-
 import type {
   InfluencerChannel,
 } from "@/types/influencer";
-
+import { buildGmailComposeUrl } from "@/lib/gmail-compose";
 export const instant = false;
-
 export default async function InfluencerDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-
   const supabase = await createClient();
-
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
   if (!user) {
     redirect("/login");
   }
-
+  const { data: currentProfile } = await supabase
+    .from("profiles")
+    .select("name")
+    .eq("id", user.id)
+    .single();
   const { data: influencer, error } = await supabase
     .from("influencers")
     .select(`
@@ -62,28 +57,30 @@ export default async function InfluencerDetailPage({
     `)
     .eq("id", id)
     .single();
-
   if (error || !influencer) {
     notFound();
   }
-
   const channels: InfluencerChannel[] =
     influencer.channels ?? [];
-
   const primaryChannel =
     channels.find(
       (channel) => channel.is_primary
     ) ??
     channels[0] ??
     null;
-
   const categories: string[] =
     influencer.categories?.length
       ? influencer.categories
       : influencer.category
         ? [influencer.category]
         : [];
-
+  const gmailUrl = influencer.email
+    ? buildGmailComposeUrl({
+        email: influencer.email,
+        influencerName: influencer.name,
+        userName: currentProfile?.name ?? null,
+      })
+    : null;
   const { data: campaignHistory } =
     await supabase
       .from("campaign_influencers")
@@ -107,7 +104,6 @@ export default async function InfluencerDetailPage({
       .order("created_at", {
         ascending: false,
       });
-
   const { data: influencerLogsRaw } = await supabase
     .from("audit_logs")
     .select(`
@@ -132,7 +128,6 @@ export default async function InfluencerDetailPage({
         .filter((id): id is string => Boolean(id))
     ),
   ];
-
   const { data: actors } =
     actorIds.length > 0
       ? await supabase
@@ -140,21 +135,18 @@ export default async function InfluencerDetailPage({
           .select("id, name, email")
           .in("id", actorIds)
       : { data: [] };
-
   const actorMap = new Map(
     (actors ?? []).map((actor) => [
       actor.id,
       actor,
     ])
   );
-
   const influencerLogs = (
     influencerLogsRaw ?? []
   ).map((log) => {
     const actor = log.actor_id
       ? actorMap.get(log.actor_id)
       : null;
-
     return {
       ...log,
       actor_name:
@@ -172,7 +164,6 @@ export default async function InfluencerDetailPage({
         >
           ← 인플루언서 목록
         </Link>
-
         <div className="mt-5 rounded-xl border border-slate-300 bg-white p-6">
           <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
             <div>
@@ -183,14 +174,12 @@ export default async function InfluencerDetailPage({
                     primaryChannel?.handle ||
                     "이름 없음"}
                 </h1>
-
                 {primaryChannel && (
                   <PlatformBadge
                     platform={primaryChannel.platform}
                   />
                 )}
               </div>
-
               {primaryChannel && (
                 <div className="mt-2 text-sm text-slate-500">
                   {primaryChannel.channel_name && (
@@ -198,7 +187,6 @@ export default async function InfluencerDetailPage({
                       {primaryChannel.channel_name}
                     </span>
                   )}
-
                   {primaryChannel.handle && (
                     <span
                       className={
@@ -212,7 +200,6 @@ export default async function InfluencerDetailPage({
                   )}
                 </div>
               )}
-
               {channels.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   {channels.map((channel, index) => (
@@ -228,7 +215,6 @@ export default async function InfluencerDetailPage({
                 </div>
               )}
             </div>
-
             <div className="flex flex-wrap gap-3">
               <Link
                 href={`/influencers/${influencer.id}/edit`}
@@ -236,7 +222,6 @@ export default async function InfluencerDetailPage({
               >
                 수정
               </Link>
-
               <DeleteInfluencerButton
                 influencerId={influencer.id}
                 influencerName={
@@ -245,7 +230,6 @@ export default async function InfluencerDetailPage({
                   "인플루언서"
                 }
               />
-
               {primaryChannel?.url && (
                 <a
                   href={primaryChannel.url}
@@ -265,23 +249,35 @@ export default async function InfluencerDetailPage({
             <h2 className="mb-5 text-lg font-semibold text-slate-900">
               기본 정보
             </h2>
-
             <div className="space-y-4 text-sm">
               <Info
                 label="이름"
                 value={influencer.name}
               />
-
-              <Info
-                label="이메일"
-                value={influencer.email}
-              />
-
+              <div className="flex justify-between gap-5 border-b border-slate-100 pb-3">
+                <span className="text-slate-500">이메일</span>
+                {influencer.email && gmailUrl ? (
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-slate-900">
+                      {influencer.email}
+                    </span>
+                    <a
+                      href={gmailUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      메일 보내기
+                    </a>
+                  </div>
+                ) : (
+                  <span className="text-slate-400">-</span>
+                )}
+              </div>
               <div className="border-b border-slate-100 pb-3">
                 <div className="mb-2 text-slate-500">
                   카테고리
                 </div>
-
                 {categories.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5">
                     {categories.map((category) => (
@@ -299,30 +295,21 @@ export default async function InfluencerDetailPage({
                   </span>
                 )}
               </div>
-
-              <Info
-                label="세부 카테고리"
-                value={influencer.subcategory}
-              />
-
               <Info
                 label="성별"
                 value={influencer.gender}
               />
-
               <Info
                 label="연령대"
                 value={influencer.age_group}
               />
             </div>
           </section>
-
           {/* 협업 정보 */}
           <section className="rounded-xl border border-slate-300 bg-white p-6">
             <h2 className="mb-5 text-lg font-semibold text-slate-900">
               협업 정보
             </h2>
-
             <div className="space-y-4 text-sm">
               <Info
                 label="대표 채널 단가"
@@ -335,12 +322,10 @@ export default async function InfluencerDetailPage({
                     : formatPriceMan(influencer.collaboration_rate)
                 }
               />
-
               <Info
                 label="등록 채널 수"
                 value={`${channels.length}개`}
               />
-
               <Info
                 label="대표 채널"
                 value={
@@ -351,7 +336,6 @@ export default async function InfluencerDetailPage({
                     : "-"
                 }
               />
-
               <Info
                 label="대표 채널 팔로워"
                 value={
@@ -371,17 +355,14 @@ export default async function InfluencerDetailPage({
               <h2 className="text-lg font-semibold text-slate-900">
                 채널 정보
               </h2>
-
               <p className="mt-1 text-sm text-slate-500">
                 등록된 SNS 및 콘텐츠 채널입니다.
               </p>
             </div>
-
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
               {channels.length}개
             </span>
           </div>
-
           {channels.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-300 px-6 py-10 text-center text-sm text-slate-400">
               등록된 채널이 없습니다.
@@ -405,14 +386,12 @@ export default async function InfluencerDetailPage({
                     <PlatformBadge
                       platform={channel.platform}
                     />
-
                     {channel.is_primary && (
                       <span className="rounded-full bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white">
                         대표 채널
                       </span>
                     )}
                   </div>
-
                   {/* 채널명 / ID */}
                   <div className="mt-4">
                     <p className="font-semibold text-slate-900">
@@ -421,7 +400,6 @@ export default async function InfluencerDetailPage({
                           ? `@${channel.handle}`
                           : "채널명 없음")}
                     </p>
-
                     {channel.channel_name &&
                       channel.handle && (
                         <p className="mt-1 text-sm text-slate-500">
@@ -429,7 +407,6 @@ export default async function InfluencerDetailPage({
                         </p>
                       )}
                   </div>
-
                   {/* 지표 */}
                   <div className="mt-5 grid grid-cols-3 gap-4">
                     <div>
@@ -451,14 +428,12 @@ export default async function InfluencerDetailPage({
                       </p>
                     </div>
                   </div>
-
                   {/* 메모 */}
                   {channel.memo && (
                     <div className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
                       {channel.memo}
                     </div>
                   )}
-
                   {/* 링크 */}
                   {channel.url && (
                     <a
@@ -475,25 +450,21 @@ export default async function InfluencerDetailPage({
             </div>
           )}
         </section>
-
         <section className="mt-5 rounded-xl border border-slate-200 bg-white p-6">
           <h2 className="mb-4 text-lg font-semibold">
             내부 메모
           </h2>
-
           <p className="whitespace-pre-wrap text-sm text-slate-600">
             {influencer.memo ||
               "등록된 메모가 없습니다."}
           </p>
         </section>
-
         <section className="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="border-b border-slate-200 px-6 py-5">
             <h2 className="text-lg font-semibold">
               캠페인 제안 / 협업 이력
             </h2>
           </div>
-
           {!campaignHistory?.length ? (
             <div className="p-10 text-center text-sm text-slate-400">
               아직 등록된 캠페인 이력이 없습니다.
@@ -509,11 +480,9 @@ export default async function InfluencerDetailPage({
                       ? history
                           .campaigns[0]
                       : history.campaigns;
-
                   if (!campaign) {
                     return null;
                   }
-
                   return (
                     <Link
                       key={history.id}
@@ -524,7 +493,6 @@ export default async function InfluencerDetailPage({
                         <p className="font-medium text-slate-900">
                           {campaign.name}
                         </p>
-
                         <p className="mt-1 text-sm text-slate-500">
                           {campaign.brand ||
                             "-"}
@@ -532,7 +500,6 @@ export default async function InfluencerDetailPage({
                             ? ` · ${campaign.product}`
                             : ""}
                         </p>
-
                         {(campaign.start_date ||
                           campaign.end_date) && (
                           <p className="mt-1 text-xs text-slate-400">
@@ -544,7 +511,6 @@ export default async function InfluencerDetailPage({
                           </p>
                         )}
                       </div>
-
                       <div className="text-right">
                         <span
                           className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${getCampaignInfluencerStatusClass(
@@ -555,7 +521,6 @@ export default async function InfluencerDetailPage({
                             history.status
                           )}
                         </span>
-
                         <p className="mt-1 text-xs text-slate-500">
                           {history.final_rate
                             ? formatPriceMan(
@@ -574,9 +539,7 @@ export default async function InfluencerDetailPage({
               )}
             </div>
           )}
-
         </section>
-
         <section className="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white">
           <details>
             <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-5 hover:bg-slate-50">
@@ -584,17 +547,14 @@ export default async function InfluencerDetailPage({
                 <h2 className="text-lg font-semibold">
                   변경 이력
                 </h2>
-
                 <p className="mt-1 text-sm text-slate-500">
                   이 인플루언서의 최근 등록 / 수정 기록
                 </p>
               </div>
-
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
                 최근 {influencerLogs.length}건
               </span>
             </summary>
-
             <div className="border-t border-slate-200">
               {influencerLogs.length === 0 ? (
                 <div className="px-6 py-8 text-center text-sm text-slate-400">
@@ -629,14 +589,12 @@ export default async function InfluencerDetailPage({
                               log.actor_email ||
                               "알 수 없는 사용자"}
                           </p>
-
                           {log.actor_name &&
                             log.actor_email && (
                               <p className="mt-0.5 truncate text-xs text-slate-400">
                                 {log.actor_email}
                               </p>
                             )}
-
                           {log.action === "UPDATE" && (
                             <div className="mt-1 text-xs text-slate-500">
                               {getChangedFields(
@@ -681,7 +639,6 @@ export default async function InfluencerDetailPage({
     </main>
   );
 }
-
 function Info({
   label,
   value,
@@ -698,26 +655,22 @@ function Info({
       <span className="text-slate-500">
         {label}
       </span>
-
       <span className="text-right font-medium text-slate-900">
         {value || "-"}
       </span>
     </div>
   );
 }
-
 function getChangedFields(
   oldData: Record<string, unknown> | null,
   newData: Record<string, unknown> | null
 ) {
   if (!oldData || !newData) return [];
-
   const ignoredFields = [
     "updated_at",
     "created_at",
     "id",
   ];
-
   const labelMap: Record<string, string> = {
     name: "이름",
     instagram_id: "Instagram ID",
@@ -728,13 +681,11 @@ function getChangedFields(
     avg_views: "평균 조회수",
     category: "대표 카테고리",
     categories: "카테고리",
-    subcategory: "세부 카테고리",
     gender: "성별",
     age_group: "연령대",
     collaboration_rate: "협업 단가",
     memo: "메모",
   };
-
   return Object.keys(newData)
     .filter(
       (key) =>
@@ -748,7 +699,6 @@ function getChangedFields(
       newValue: newData[key],
     }));
 }
-
 function formatAuditValue(
   key: string,
   value: unknown
@@ -760,7 +710,6 @@ function formatAuditValue(
   ) {
     return "없음";
   }
-
   if (
     key === "categories" &&
     Array.isArray(value)
@@ -769,20 +718,17 @@ function formatAuditValue(
       ? value.join(", ")
       : "없음";
   }
-
   if (
     key === "followers" ||
     key === "avg_views"
   ) {
     return formatMan(Number(value));
   }
-
   if (key === "collaboration_rate") {
     return formatPriceMan(
       Number(value)
     );
   }
-
   return String(value);
 }
 function getPlatformLabel(
@@ -798,7 +744,6 @@ function getPlatformLabel(
     naver_blog: "Naver Blog",
     xiaohongshu: "Xiaohongshu",
   };
-
   return (
     labels[platform] ||
     platform

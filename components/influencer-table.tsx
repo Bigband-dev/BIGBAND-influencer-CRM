@@ -16,6 +16,8 @@ import type {
   InfluencerPlatform,
 } from "@/types/influencer";
 
+import { buildGmailComposeUrl } from "@/lib/gmail-compose";
+
 type Influencer = {
   id: string;
 
@@ -24,7 +26,6 @@ type Influencer = {
 
   category: string | null;
   categories?: string[] | null;
-  subcategory: string | null;
 
   gender: string | null;
   age_group: string | null;
@@ -150,8 +151,10 @@ function getCollaborationRate(influencer: Influencer) {
 
 export default function InfluencerTable({
   influencers,
+  currentUserName,
 }: {
   influencers: Influencer[];
+  currentUserName: string | null;
 }) {
   const supabase = createClient();
   const router = useRouter();
@@ -970,12 +973,22 @@ export default function InfluencerTable({
                               "-"}
                           </p>
 
-                          {influencer.email && (
-                            <p className="mt-1 text-xs text-slate-400">
-                              {
-                                influencer.email
-                              }
-                            </p>
+                          {influencer.email ? (
+                            <a
+                              href={buildGmailComposeUrl({
+                                email: influencer.email,
+                                influencerName: influencer.name,
+                                userName: currentUserName,
+                              })}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-sm font-medium text-blue-600 hover:underline"
+                            >
+                              {influencer.email}
+                            </a>
+                          ) : (
+                            <span className="text-slate-400">-</span>
                           )}
                         </div>
                       </td>

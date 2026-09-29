@@ -16,6 +16,17 @@ export default async function InfluencersPage() {
   if (!user) {
     redirect("/login");
   }
+  let currentUserName: string | null = null;
+
+  if (user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("name")
+      .eq("id", user.id)
+      .single();
+
+    currentUserName = profile?.name ?? null;
+  }
 
   const { data: influencers, error } = await supabase
     .from("influencers")
@@ -83,7 +94,9 @@ export default async function InfluencersPage() {
 
         </div>
         {/* 인플루언서 목록 */}
-        <InfluencerTable influencers={influencers ?? []} />
+        <InfluencerTable 
+          influencers={influencers ?? []} 
+          currentUserName={currentUserName} />
 
       </div>
   </div>

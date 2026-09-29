@@ -17,7 +17,6 @@ type InfluencerFormValues = {
   phone?: string | null;
   category?: string | null;
   categories?: string[] | null;
-  subcategory?: string | null;
   gender?: string | null;
   age_group?: string | null;
   collaboration_rate?: number | null;
@@ -140,8 +139,6 @@ export default function InfluencerForm({
         initialData?.email ?? "",
       phone:
         initialData?.phone ?? "",
-      subcategory:
-        initialData?.subcategory ?? "",
       gender:
         initialData?.gender ?? "",
       age_group:
@@ -423,9 +420,6 @@ export default function InfluencerForm({
           selectedCategories.length > 0
             ? selectedCategories
             : null,
-        subcategory:
-          form.subcategory.trim() ||
-          null,
         gender:
           form.gender.trim() ||
           null,
@@ -928,17 +922,6 @@ export default function InfluencerForm({
               여러 카테고리를 선택할 수 있습니다.
             </p>
           </div>
-          <Field
-            label="세부 카테고리"
-            value={form.subcategory}
-            onChange={(value) =>
-              updateField(
-                "subcategory",
-                value
-              )
-            }
-            placeholder="필요한 경우 입력"
-          />
         </div>
       </section>
       {/* 채널 정보 */}

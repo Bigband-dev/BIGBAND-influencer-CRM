@@ -40,8 +40,6 @@ export type Influencer = {
 
   categories?: string[] | null;
 
-  subcategory: string | null;
-
   gender: string | null;
 
   age_group: string | null;
