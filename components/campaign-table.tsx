@@ -3,6 +3,35 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatPriceMan } from "@/lib/format-number";
+import { CAMPAIGN_INFLUENCER_STATUS } from "@/lib/campaign-status";
+
+const STATUS_ENTRIES = Object.entries(CAMPAIGN_INFLUENCER_STATUS);
+
+function normalizeStatusLabel(label: unknown) {
+  return String(label ?? "").replace(/\s/g, "");
+}
+
+function isConfirmedStatus(status: string | null) {
+  const contactedIndex = STATUS_ENTRIES.findIndex(([, label]) =>
+    normalizeStatusLabel(label).includes("컨택완료")
+  );
+  const statusIndex = STATUS_ENTRIES.findIndex(
+    ([value]) => value === (status || "candidate")
+  );
+
+  if (contactedIndex >= 0 && statusIndex >= 0) {
+    return statusIndex >= contactedIndex;
+  }
+
+  return [
+    "contacted",
+    "proposal_wait",
+    "draft_wait",
+    "final_wait",
+    "confirmed",
+    "completed",
+  ].includes(status || "");
+}
 
 type Campaign = {
   id: string;
@@ -184,13 +213,16 @@ export default function CampaignTable({
 
           <tbody className="divide-y divide-slate-300">
             {filteredCampaigns.map((campaign) => {
-                const candidateCount =
-                  campaign.campaign_influencers?.length ?? 0;
-                  
-                const confirmedCount = 
-                  campaign.campaign_influencers?.filter(
-                    (influencer) => influencer.status === "confirmed"
-                  ).length ?? 0;
+                const campaignMembers =
+                  campaign.campaign_influencers ?? [];
+
+                const confirmedCount = campaignMembers.filter(
+                  (influencer) => isConfirmedStatus(influencer.status)
+                ).length;
+
+                const candidateCount = campaignMembers.filter(
+                  (influencer) => !isConfirmedStatus(influencer.status)
+                ).length;
 
                 return (
                   <tr
@@ -242,7 +274,7 @@ export default function CampaignTable({
             {filteredCampaigns.length === 0 && (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={8}
                   className="px-5 py-16 text-center text-slate-400"
                 >
                   조건에 맞는 캠페인이 없습니다.

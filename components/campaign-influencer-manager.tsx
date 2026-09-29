@@ -4,9 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { formatMan } from "@/lib/format-number";
-import {
-  CAMPAIGN_INFLUENCER_STATUS,
-} from "@/lib/campaign-status";
+import { CAMPAIGN_INFLUENCER_STATUS } from "@/lib/campaign-status";
 
 type Influencer = {
   id: string;
@@ -28,6 +26,36 @@ type CampaignInfluencer = {
   influencers: Influencer | Influencer[] | null;
 };
 
+const STATUS_ENTRIES = Object.entries(CAMPAIGN_INFLUENCER_STATUS);
+
+function normalizeStatusLabel(label: unknown) {
+  return String(label ?? "").replace(/\s/g, "");
+}
+
+function isConfirmedStatus(status: string | null) {
+  const contactedIndex = STATUS_ENTRIES.findIndex(([, label]) =>
+    normalizeStatusLabel(label).includes("컨택완료")
+  );
+
+  const statusIndex = STATUS_ENTRIES.findIndex(
+    ([value]) => value === (status || "candidate")
+  );
+
+  if (contactedIndex >= 0 && statusIndex >= 0) {
+    return statusIndex >= contactedIndex;
+  }
+
+  // campaign-status의 라벨 순서가 바뀌거나 "컨택완료" 라벨을 찾지 못했을 때의 fallback
+  return [
+    "contacted",
+    "proposal_wait",
+    "draft_wait",
+    "final_wait",
+    "confirmed",
+    "completed",
+  ].includes(status || "");
+}
+
 export default function CampaignInfluencerManager({
   campaignId,
   influencers,
@@ -43,18 +71,21 @@ export default function CampaignInfluencerManager({
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [adding, setAdding] = useState(false);
-
-  const [selectedCampaignIds, setSelectedCampaignIds] =
-    useState<string[]>([]);
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const [removing, setRemoving] = useState(false);
 
   const existingIds = useMemo(
-    () =>
-      new Set(
-        campaignInfluencers.map(
-          (item) => item.influencer_id
-        )
-      ),
+    () => new Set(campaignInfluencers.map((item) => item.influencer_id)),
+    [campaignInfluencers]
+  );
+
+  const candidateInfluencers = useMemo(
+    () => campaignInfluencers.filter((item) => !isConfirmedStatus(item.status)),
+    [campaignInfluencers]
+  );
+
+  const confirmedInfluencers = useMemo(
+    () => campaignInfluencers.filter((item) => isConfirmedStatus(item.status)),
     [campaignInfluencers]
   );
 
@@ -62,15 +93,12 @@ export default function CampaignInfluencerManager({
     const keyword = search.toLowerCase().trim();
 
     return influencers.filter((item) => {
-      if (existingIds.has(item.id)) {
-        return false;
-      }
-
+      if (existingIds.has(item.id)) return false;
       if (!keyword) return true;
 
       return (
         item.name?.toLowerCase().includes(keyword) ||
-        item.instagram_id.toLowerCase().includes(keyword) ||
+        item.instagram_id?.toLowerCase().includes(keyword) ||
         item.category?.toLowerCase().includes(keyword)
       );
     });
@@ -97,9 +125,7 @@ export default function CampaignInfluencerManager({
 
     const { error } = await supabase
       .from("campaign_influencers")
-      .upsert(rows, {
-        onConflict: "campaign_id,influencer_id",
-      });
+      .upsert(rows, { onConflict: "campaign_id,influencer_id" });
 
     setAdding(false);
 
@@ -135,13 +161,10 @@ export default function CampaignInfluencerManager({
     setSelectedCampaignIds((prev) =>
       prev.filter((id) => id !== campaignInfluencerId)
     );
-
     router.refresh();
   };
 
-  const toggleCampaignInfluencer = (
-    campaignInfluencerId: string
-  ) => {
+  const toggleCampaignInfluencer = (campaignInfluencerId: string) => {
     setSelectedCampaignIds((prev) =>
       prev.includes(campaignInfluencerId)
         ? prev.filter((id) => id !== campaignInfluencerId)
@@ -149,29 +172,25 @@ export default function CampaignInfluencerManager({
     );
   };
 
-  const allCampaignSelected =
-    campaignInfluencers.length > 0 &&
-    campaignInfluencers.every((item) =>
-      selectedCampaignIds.includes(item.id)
-    );
+  const areAllSelected = (items: CampaignInfluencer[]) =>
+    items.length > 0 &&
+    items.every((item) => selectedCampaignIds.includes(item.id));
 
-  const toggleAllCampaignInfluencers = () => {
-    if (allCampaignSelected) {
-      setSelectedCampaignIds([]);
-    } else {
-      setSelectedCampaignIds(
-        campaignInfluencers.map((item) => item.id)
+  const toggleAll = (items: CampaignInfluencer[]) => {
+    const ids = items.map((item) => item.id);
+
+    if (areAllSelected(items)) {
+      setSelectedCampaignIds((prev) =>
+        prev.filter((id) => !ids.includes(id))
       );
+      return;
     }
+
+    setSelectedCampaignIds((prev) => [...new Set([...prev, ...ids])]);
   };
 
   const handleBulkRemove = async () => {
-    if (
-      selectedCampaignIds.length === 0 ||
-      removing
-    ) {
-      return;
-    }
+    if (selectedCampaignIds.length === 0 || removing) return;
 
     const confirmed = window.confirm(
       `선택한 ${selectedCampaignIds.length}명의 인플루언서를 이 캠페인에서 제거하시겠습니까?\n\n인플루언서 DB 자체는 삭제되지 않고 캠페인 연결만 제거됩니다.`
@@ -203,9 +222,7 @@ export default function CampaignInfluencerManager({
   ) => {
     const { error } = await supabase
       .from("campaign_influencers")
-      .update({
-        status,
-      })
+      .update({ status })
       .eq("id", campaignInfluencerId);
 
     if (error) {
@@ -216,57 +233,65 @@ export default function CampaignInfluencerManager({
     router.refresh();
   };
 
-  return (
-    <div className="space-y-6">
-      <section className="overflow-hidden rounded-xl border-2 border-slate-400 bg-white">
-        <div className="flex items-center justify-between border-b-2 border-slate-400 px-6 py-5">
-          <div>
-            <h2 className="text-lg font-bold">
-              캠페인 인플루언서
-            </h2>
-
-            <p className="mt-1 text-sm text-slate-500">
-              현재 캠페인에 등록된 인플루언서입니다.
-            </p>
+  const renderCampaignTable = (
+    title: string,
+    description: string,
+    items: CampaignInfluencer[],
+    confirmed = false
+  ) => (
+    <section className="overflow-hidden rounded-xl border-2 border-slate-400 bg-white">
+      <div className="flex items-center justify-between border-b-2 border-slate-400 px-6 py-5">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-bold">{title}</h2>
+            <span
+              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                confirmed
+                  ? "bg-emerald-100 text-emerald-700"
+                  : "bg-slate-100 text-slate-700"
+              }`}
+            >
+              {items.length}명
+            </span>
           </div>
-          {selectedCampaignIds.length > 0 && (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  setSelectedCampaignIds([])
-                }
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-              >
-                선택 해제
-              </button>
-
-              <button
-                type="button"
-                onClick={handleBulkRemove}
-                disabled={removing}
-                className="rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {removing
-                  ? "제거 중..."
-                  : `선택 ${selectedCampaignIds.length}명 제거`}
-              </button>
-            </div>
-          )}
+          <p className="mt-1 text-sm text-slate-500">{description}</p>
         </div>
 
-        <table className="w-full text-sm">
+        {selectedCampaignIds.length > 0 && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedCampaignIds([])}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              선택 해제
+            </button>
+            <button
+              type="button"
+              onClick={handleBulkRemove}
+              disabled={removing}
+              className="rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {removing
+                ? "제거 중..."
+                : `선택 ${selectedCampaignIds.length}명 제거`}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[900px] text-sm">
           <thead className="bg-slate-100">
             <tr>
               <th className="w-12 px-4 py-3 text-center">
                 <input
                   type="checkbox"
-                  checked={allCampaignSelected}
-                  onChange={toggleAllCampaignInfluencers}
-                  aria-label="전체 선택"
+                  checked={areAllSelected(items)}
+                  onChange={() => toggleAll(items)}
+                  aria-label={`${title} 전체 선택`}
                 />
               </th>
-
               <th className="px-5 py-3 text-left">이름</th>
               <th className="px-5 py-3 text-left">Instagram</th>
               <th className="px-5 py-3 text-left">카테고리</th>
@@ -277,22 +302,18 @@ export default function CampaignInfluencerManager({
           </thead>
 
           <tbody className="divide-y divide-slate-300">
-            {campaignInfluencers.map((item) => {
+            {items.map((item) => {
               const influencer = Array.isArray(item.influencers)
                 ? item.influencers[0]
                 : item.influencers;
 
-              if (!influencer) {
-                return null;
-              }
+              if (!influencer) return null;
 
               return (
                 <tr
                   key={item.id}
                   onClick={() =>
-                    router.push(
-                      `/influencers/${influencer.id}`
-                    )
+                    router.push(`/influencers/${influencer.id}`)
                   }
                   className="cursor-pointer transition hover:bg-slate-50"
                 >
@@ -302,15 +323,10 @@ export default function CampaignInfluencerManager({
                   >
                     <input
                       type="checkbox"
-                      checked={selectedCampaignIds.includes(
-                        item.id
-                      )}
-                      onChange={() =>
-                        toggleCampaignInfluencer(item.id)
-                      }
+                      checked={selectedCampaignIds.includes(item.id)}
+                      onChange={() => toggleCampaignInfluencer(item.id)}
                       aria-label={`${
-                        influencer.name ||
-                        influencer.instagram_id
+                        influencer.name || influencer.instagram_id
                       } 선택`}
                     />
                   </td>
@@ -320,7 +336,9 @@ export default function CampaignInfluencerManager({
                   </td>
 
                   <td className="px-5 py-4">
-                    @{influencer.instagram_id}
+                    {influencer.instagram_id
+                      ? `@${influencer.instagram_id}`
+                      : "-"}
                   </td>
 
                   <td className="px-5 py-4">
@@ -338,20 +356,12 @@ export default function CampaignInfluencerManager({
                     <select
                       value={item.status || "candidate"}
                       onChange={(e) =>
-                        handleStatusChange(
-                          item.id,
-                          e.target.value
-                        )
+                        handleStatusChange(item.id, e.target.value)
                       }
                       className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
                     >
-                      {Object.entries(
-                        CAMPAIGN_INFLUENCER_STATUS
-                      ).map(([value, label]) => (
-                        <option
-                          key={value}
-                          value={value}
-                        >
+                      {STATUS_ENTRIES.map(([value, label]) => (
+                        <option key={value} value={value}>
                           {label}
                         </option>
                       ))}
@@ -367,8 +377,7 @@ export default function CampaignInfluencerManager({
                       onClick={() =>
                         handleRemove(
                           item.id,
-                          influencer.name ||
-                            influencer.instagram_id
+                          influencer.name || influencer.instagram_id
                         )
                       }
                       className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
@@ -380,27 +389,43 @@ export default function CampaignInfluencerManager({
               );
             })}
 
-            {!campaignInfluencers.length && (
+            {items.length === 0 && (
               <tr>
                 <td
                   colSpan={7}
                   className="px-5 py-12 text-center text-slate-400"
                 >
-                  아직 등록된 인플루언서가 없습니다.
+                  {confirmed
+                    ? "컨택완료 이후 단계의 확정 인원이 없습니다."
+                    : "현재 후보 인원이 없습니다."}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
-      </section>
+      </div>
+    </section>
+  );
+
+  return (
+    <div className="space-y-6">
+      {renderCampaignTable(
+        "후보 인원",
+        "컨택완료 이전 단계의 캠페인 후보입니다.",
+        candidateInfluencers
+      )}
+
+      {renderCampaignTable(
+        "확정 인원",
+        "컨택완료 및 그 이후 단계의 인플루언서입니다.",
+        confirmedInfluencers,
+        true
+      )}
 
       <section className="rounded-xl border-2 border-slate-400 bg-white p-6">
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-bold">
-              DB에서 인플루언서 추가
-            </h2>
-
+            <h2 className="text-lg font-bold">DB에서 인플루언서 추가</h2>
             <p className="mt-1 text-sm text-slate-500">
               기존 인플루언서 DB에서 캠페인 후보를 선택합니다.
             </p>
@@ -409,15 +434,10 @@ export default function CampaignInfluencerManager({
           <button
             type="button"
             onClick={handleAdd}
-            disabled={
-              adding ||
-              selectedIds.length === 0
-            }
+            disabled={adding || selectedIds.length === 0}
             className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
           >
-            {adding
-              ? "추가 중..."
-              : `${selectedIds.length}명 추가`}
+            {adding ? "추가 중..." : `${selectedIds.length}명 추가`}
           </button>
         </div>
 
@@ -433,34 +453,25 @@ export default function CampaignInfluencerManager({
           <table className="w-full text-sm">
             <tbody className="divide-y divide-slate-300">
               {availableInfluencers.map((influencer) => (
-                <tr
-                  key={influencer.id}
-                  className="hover:bg-slate-50"
-                >
+                <tr key={influencer.id} className="hover:bg-slate-50">
                   <td className="w-12 px-4 py-3">
                     <input
                       type="checkbox"
-                      checked={selectedIds.includes(
-                        influencer.id
-                      )}
-                      onChange={() =>
-                        toggle(influencer.id)
-                      }
+                      checked={selectedIds.includes(influencer.id)}
+                      onChange={() => toggle(influencer.id)}
                     />
                   </td>
-
                   <td className="px-4 py-3 font-semibold">
                     {influencer.name || "-"}
                   </td>
-
                   <td className="px-4 py-3">
-                    @{influencer.instagram_id}
+                    {influencer.instagram_id
+                      ? `@${influencer.instagram_id}`
+                      : "-"}
                   </td>
-
                   <td className="px-4 py-3">
                     {influencer.category || "-"}
                   </td>
-
                   <td className="px-4 py-3 text-right">
                     {formatMan(influencer.followers)}
                   </td>
