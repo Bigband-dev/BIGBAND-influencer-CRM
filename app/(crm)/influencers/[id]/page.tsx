@@ -18,6 +18,18 @@ import type {
   InfluencerChannel,
 } from "@/types/influencer";
 import { buildGmailComposeUrl } from "@/lib/gmail-compose";
+
+type ChannelRateRow = {
+  id: string;
+  channel_id: string;
+  content_type: string;
+  rate: number | null;
+  memo: string | null;
+};
+
+type InfluencerChannelWithRates = InfluencerChannel & {
+  rates?: ChannelRateRow[];
+};
 export const instant = false;
 export default async function InfluencerDetailPage({
   params,
@@ -52,7 +64,14 @@ export default async function InfluencerDetailPage({
         avg_views,
         collaboration_rate,
         is_primary,
-        memo
+        memo,
+        rates:influencer_channel_rates (
+          id,
+          channel_id,
+          content_type,
+          rate,
+          memo
+        )
       )
     `)
     .eq("id", id)
@@ -60,7 +79,7 @@ export default async function InfluencerDetailPage({
   if (error || !influencer) {
     notFound();
   }
-  const channels: InfluencerChannel[] =
+  const channels: InfluencerChannelWithRates[] =
     influencer.channels ?? [];
   const primaryChannel =
     channels.find(
@@ -180,26 +199,6 @@ export default async function InfluencerDetailPage({
                   />
                 )}
               </div>
-              {primaryChannel && (
-                <div className="mt-2 text-sm text-slate-500">
-                  {primaryChannel.channel_name && (
-                    <span>
-                      {primaryChannel.channel_name}
-                    </span>
-                  )}
-                  {primaryChannel.handle && (
-                    <span
-                      className={
-                        primaryChannel.channel_name
-                          ? "ml-2"
-                          : ""
-                      }
-                    >
-                      @{primaryChannel.handle}
-                    </span>
-                  )}
-                </div>
-              )}
               {channels.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   {channels.map((channel, index) => (
@@ -315,11 +314,10 @@ export default async function InfluencerDetailPage({
                 label="대표 채널 단가"
                 value={
                   primaryChannel
-                    ? formatPriceMan(
-                        primaryChannel.collaboration_rate ??
-                          influencer.collaboration_rate
+                    ? formatChannelRates(
+                        primaryChannel
                       )
-                    : formatPriceMan(influencer.collaboration_rate)
+                    : "-"
                 }
               />
               <Info
@@ -408,7 +406,7 @@ export default async function InfluencerDetailPage({
                       )}
                   </div>
                   {/* 지표 */}
-                  <div className="mt-5 grid grid-cols-3 gap-4">
+                  <div className="mt-5 grid grid-cols-2 gap-4">
                     <div>
                       <p className="text-xs text-slate-500">팔로워 / 구독자</p>
                       <p className="mt-1 font-semibold text-slate-900">
@@ -421,12 +419,61 @@ export default async function InfluencerDetailPage({
                         {formatMan(channel.avg_views)}
                       </p>
                     </div>
-                    <div>
-                      <p className="text-xs text-slate-500">최근 협업 단가</p>
-                      <p className="mt-1 font-semibold text-slate-900">
-                        {formatPriceMan(channel.collaboration_rate)}
+                  </div>
+
+                  <div className="mt-5 border-t border-slate-200 pt-4">
+                    <p className="text-xs font-semibold text-slate-500">
+                      콘텐츠 유형별 협업 단가
+                    </p>
+
+                    {channel.rates?.length ? (
+                      <div className="mt-3 space-y-2">
+                        {[...channel.rates]
+                          .sort(
+                            (a, b) =>
+                              getContentTypeOrder(
+                                channel.platform,
+                                a.content_type
+                              ) -
+                              getContentTypeOrder(
+                                channel.platform,
+                                b.content_type
+                              )
+                          )
+                          .map((rate) => (
+                            <div
+                              key={rate.id}
+                              className="flex items-center justify-between text-sm"
+                            >
+                              <span className="text-slate-600">
+                                {getContentTypeLabel(
+                                  rate.content_type
+                                )}
+                              </span>
+                              <span className="font-semibold text-slate-900">
+                                {formatPriceMan(
+                                  rate.rate
+                                )}
+                              </span>
+                            </div>
+                          ))}
+                      </div>
+                    ) : channel.collaboration_rate ? (
+                      <div className="mt-3 flex items-center justify-between text-sm">
+                        <span className="text-slate-500">
+                          기존 단일 단가
+                        </span>
+                        <span className="font-semibold text-slate-900">
+                          {formatPriceMan(
+                            channel.collaboration_rate
+                          )}
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-sm text-slate-400">
+                        등록된 단가가 없습니다.
                       </p>
-                    </div>
+                    )}
                   </div>
                   {/* 메모 */}
                   {channel.memo && (
@@ -508,6 +555,11 @@ export default async function InfluencerDetailPage({
                             {" ~ "}
                             {campaign.end_date ||
                               "-"}
+                          </p>
+                        )}
+                        {history.memo && (
+                          <p className="mt-2 whitespace-pre-wrap text-xs text-slate-500">
+                            {history.memo}
                           </p>
                         )}
                       </div>
@@ -731,6 +783,109 @@ function formatAuditValue(
   }
   return String(value);
 }
+function getContentTypeLabel(
+  contentType: string
+) {
+  const labels: Record<string, string> = {
+    feed: "Feed",
+    reels: "Reels",
+    story: "Story",
+    shorts: "Shorts",
+    bdc: "BDC",
+    ppl: "PPL",
+    video: "Video",
+    post: "Post",
+    other: "기타",
+  };
+
+  return (
+    labels[contentType] ||
+    contentType
+  );
+}
+
+function getContentTypeOrder(
+  platform: string,
+  contentType: string
+) {
+  const order: Record<
+    string,
+    string[]
+  > = {
+    instagram: [
+      "feed",
+      "reels",
+      "story",
+      "other",
+    ],
+    youtube: [
+      "shorts",
+      "bdc",
+      "ppl",
+      "other",
+    ],
+    tiktok: [
+      "video",
+      "other",
+    ],
+    naver_blog: [
+      "post",
+      "other",
+    ],
+    xiaohongshu: [
+      "post",
+      "video",
+      "other",
+    ],
+  };
+
+  const index =
+    order[platform]?.indexOf(
+      contentType
+    ) ?? -1;
+
+  return index === -1
+    ? 999
+    : index;
+}
+
+function formatChannelRates(
+  channel: InfluencerChannelWithRates
+) {
+  if (
+    channel.rates &&
+    channel.rates.length > 0
+  ) {
+    return [...channel.rates]
+      .sort(
+        (a, b) =>
+          getContentTypeOrder(
+            channel.platform,
+            a.content_type
+          ) -
+          getContentTypeOrder(
+            channel.platform,
+            b.content_type
+          )
+      )
+      .map(
+        (rate) =>
+          `${getContentTypeLabel(
+            rate.content_type
+          )} ${formatPriceMan(
+            rate.rate
+          )}`
+      )
+      .join(" · ");
+  }
+
+  return channel.collaboration_rate
+    ? `기존 ${formatPriceMan(
+        channel.collaboration_rate
+      )}`
+    : "-";
+}
+
 function getPlatformLabel(
   platform: string
 ) {

@@ -10,6 +10,18 @@ import {
   INFLUENCER_CATEGORIES,
 } from "@/lib/influencer-categories";
 
+type ChannelRateRow = {
+  id?: string;
+  channel_id?: string;
+  content_type: string;
+  rate: number | null;
+  memo?: string | null;
+};
+
+type InfluencerChannelWithRates = InfluencerChannel & {
+  rates?: ChannelRateRow[];
+};
+
 type InfluencerFormValues = {
   id?: string;
   name?: string | null;
@@ -21,7 +33,7 @@ type InfluencerFormValues = {
   age_group?: string | null;
   collaboration_rate?: number | null;
   memo?: string | null;
-  channels?: InfluencerChannel[];
+  channels?: InfluencerChannelWithRates[];
   /*
    * 기존 DB 호환용
    * 완전히 멀티채널 구조로 이전한 뒤 제거 가능
@@ -41,6 +53,7 @@ type ChannelFormValue = {
   followers: string;
   avg_views: string;
   collaboration_rate: string;
+  rates: Record<string, string>;
   is_primary: boolean;
   memo: string;
 };
@@ -71,8 +84,39 @@ const PLATFORM_OPTIONS: {
   },
 ];
 
+const CONTENT_TYPE_OPTIONS: Record<
+  InfluencerPlatform,
+  { value: string; label: string }[]
+> = {
+  instagram: [
+    { value: "feed", label: "Feed" },
+    { value: "reels", label: "Reels" },
+    { value: "story", label: "Story" },
+    { value: "other", label: "기타" },
+  ],
+  youtube: [
+    { value: "shorts", label: "Shorts" },
+    { value: "bdc", label: "BDC" },
+    { value: "ppl", label: "PPL" },
+    { value: "other", label: "기타" },
+  ],
+  tiktok: [
+    { value: "video", label: "Video" },
+    { value: "other", label: "기타" },
+  ],
+  naver_blog: [
+    { value: "post", label: "Post" },
+    { value: "other", label: "기타" },
+  ],
+  xiaohongshu: [
+    { value: "post", label: "Post" },
+    { value: "video", label: "Video" },
+    { value: "other", label: "기타" },
+  ],
+};
+
 function channelToFormValue(
-  channel: InfluencerChannel
+  channel: InfluencerChannelWithRates
 ): ChannelFormValue {
   return {
     id: channel.id,
@@ -95,6 +139,12 @@ function channelToFormValue(
       channel.collaboration_rate != null
         ? String(channel.collaboration_rate)
         : "",
+    rates: Object.fromEntries(
+      (channel.rates ?? []).map((rate) => [
+        rate.content_type,
+        rate.rate != null ? String(rate.rate) : "",
+      ])
+    ),
     is_primary:
       channel.is_primary,
     memo:
@@ -113,6 +163,7 @@ function createEmptyChannel(
     followers: "",
     avg_views: "",
     collaboration_rate: "",
+    rates: {},
     is_primary: isPrimary,
     memo: "",
   };
@@ -204,6 +255,7 @@ export default function InfluencerForm({
                       initialData.collaboration_rate
                     )
                   : "",
+              rates: {},
               is_primary: true,
               memo: "",
             },
@@ -276,6 +328,27 @@ export default function InfluencerForm({
       )
     );
   };
+
+  const updateChannelRate = (
+    index: number,
+    contentType: string,
+    value: string
+  ) => {
+    setChannels((prev) =>
+      prev.map((channel, i) =>
+        i === index
+          ? {
+              ...channel,
+              rates: {
+                ...channel.rates,
+                [contentType]: value,
+              },
+            }
+          : channel
+      )
+    );
+  };
+
   /*
    * 채널 추가
    */
@@ -675,6 +748,10 @@ export default function InfluencerForm({
           updated_at:
             new Date().toISOString(),
         };
+        let savedChannelId:
+          string | null =
+          channel.id ?? null;
+
         if (channel.id) {
           /*
            * 기존 채널 수정
@@ -696,13 +773,6 @@ export default function InfluencerForm({
               );
           if (updateError) {
             throw updateError;
-          }
-          if (
-            index ===
-            primaryIndex
-          ) {
-            primaryChannelId =
-              channel.id;
           }
         } else {
           /*
@@ -726,13 +796,91 @@ export default function InfluencerForm({
             );
             throw insertError;
           }
-          if (
-            index ===
-            primaryIndex
-          ) {
-            primaryChannelId =
-              data.id;
+          savedChannelId =
+            data.id;
+        }
+
+        if (!savedChannelId) {
+          throw new Error(
+            "채널 ID를 확인하지 못했습니다."
+          );
+        }
+
+        /*
+         * 콘텐츠 유형별 단가 동기화
+         * 현재 플랫폼에서 사용하는 유형만 다시 저장
+         */
+        const {
+          error: rateDeleteError,
+        } = await supabase
+          .from(
+            "influencer_channel_rates"
+          )
+          .delete()
+          .eq(
+            "channel_id",
+            savedChannelId
+          );
+
+        if (rateDeleteError) {
+          throw rateDeleteError;
+        }
+
+        const rateRows =
+          CONTENT_TYPE_OPTIONS[
+            channel.platform
+          ]
+            .map((option) => {
+              const rawValue =
+                channel.rates[
+                  option.value
+                ]?.trim() ?? "";
+
+              if (!rawValue) {
+                return null;
+              }
+
+              return {
+                channel_id:
+                  savedChannelId,
+                content_type:
+                  option.value,
+                rate:
+                  Number(rawValue),
+              };
+            })
+            .filter(
+              (
+                row
+              ): row is {
+                channel_id: string;
+                content_type: string;
+                rate: number;
+              } => Boolean(row)
+            );
+
+        if (
+          rateRows.length > 0
+        ) {
+          const {
+            error: rateInsertError,
+          } = await supabase
+            .from(
+              "influencer_channel_rates"
+            )
+            .insert(rateRows);
+
+          if (rateInsertError) {
+            throw rateInsertError;
           }
+        }
+
+        if (
+          index ===
+          primaryIndex
+        ) {
+          primaryChannelId =
+            savedChannelId;
         }
       }
       /*
@@ -1151,16 +1299,57 @@ export default function InfluencerForm({
                         )
                       }
                     />
-                    <Field
-                      label="최근 협업 단가 (만원)"
-                      type="number"
-                      value={channel.collaboration_rate}
-                      onChange={(value) =>
-                        updateChannel(index, "collaboration_rate", value)
-                      }
-                      placeholder="예: 150"
-                    />
                   </div>
+
+                  <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="mb-3">
+                      <p className="text-sm font-semibold text-slate-800">
+                        콘텐츠 유형별 협업 단가
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        금액은 만원 단위입니다.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-3">
+                      {CONTENT_TYPE_OPTIONS[
+                        channel.platform
+                      ].map((option) => (
+                        <Field
+                          key={option.value}
+                          label={option.label}
+                          type="number"
+                          value={
+                            channel.rates[
+                              option.value
+                            ] ?? ""
+                          }
+                          onChange={(value) =>
+                            updateChannelRate(
+                              index,
+                              option.value,
+                              value
+                            )
+                          }
+                          placeholder="예: 150"
+                        />
+                      ))}
+                    </div>
+
+                    {channel.collaboration_rate &&
+                      Object.values(
+                        channel.rates
+                      ).every(
+                        (value) => !value
+                      ) && (
+                        <p className="mt-3 text-xs text-amber-700">
+                          기존 단일 협업 단가{" "}
+                          {channel.collaboration_rate}
+                          만원이 있습니다. 콘텐츠 유형을 확인한 뒤 위 항목에 옮겨주세요.
+                        </p>
+                      )}
+                  </div>
+
                   <div className="mt-5">
                     <label className="mb-2 block text-sm font-medium text-slate-700">
                       채널 메모

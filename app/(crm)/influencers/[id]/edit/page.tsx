@@ -46,7 +46,14 @@ export default async function EditInfluencerPage({
           avg_views,
           collaboration_rate,
           is_primary,
-          memo
+          memo,
+          rates:influencer_channel_rates (
+            id,
+            channel_id,
+            content_type,
+            rate,
+            memo
+          )
         )
       `)
       .eq("id", id)

@@ -27,6 +27,8 @@ export type InfluencerChannel = {
   is_primary: boolean;
 
   memo?: string | null;
+
+  rates?: InfluencerChannelRate[];
 };
 
 export type Influencer = {
@@ -49,4 +51,12 @@ export type Influencer = {
   memo: string | null;
 
   channels?: InfluencerChannel[];
+};
+
+export type InfluencerChannelRate = {
+  id?: string;
+  channel_id?: string;
+  content_type: string;
+  rate: number | null;
+  memo?: string | null;
 };
