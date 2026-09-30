@@ -16,7 +16,10 @@ type FieldKey =
   | "followers"
   | "avg_views"
   | "category"
-  | "collaboration_rate";
+  | "collaboration_rate"
+  | "campaign_name"
+  | "campaign_brand"
+  | "campaign_product";
 
 type Mapping = Record<FieldKey, string>;
 
@@ -35,6 +38,9 @@ type ImportRow = {
   avg_views: number | null;
   category: string | null;
   collaboration_rate: number | null;
+  campaign_name: string | null;
+  campaign_brand: string | null;
+  campaign_product: string | null;
 };
 
 const EMPTY_MAPPING: Mapping = {
@@ -46,6 +52,9 @@ const EMPTY_MAPPING: Mapping = {
   avg_views: "",
   category: "",
   collaboration_rate: "",
+  campaign_name: "",
+  campaign_brand: "",
+  campaign_product: "",
 };
 
 const FIELD_LABELS: Record<FieldKey, string> = {
@@ -57,6 +66,9 @@ const FIELD_LABELS: Record<FieldKey, string> = {
   avg_views: "평균 조회수",
   category: "카테고리",
   collaboration_rate: "협업 단가",
+  campaign_name: "캠페인명",
+  campaign_brand: "광고주 / 브랜드",
+  campaign_product: "제품명",
 };
 
 const FIELD_ALIASES: Record<FieldKey, string[]> = {
@@ -139,6 +151,36 @@ const FIELD_ALIASES: Record<FieldKey, string[]> = {
     "광고비",
     "광고 단가",
     "광고단가",
+  ],
+
+  campaign_name: [
+    "campaign",
+    "campaign_name",
+    "campaign name",
+    "캠페인",
+    "캠페인명",
+    "프로젝트",
+    "프로젝트명",
+  ],
+
+  campaign_brand: [
+    "brand",
+    "client",
+    "advertiser",
+    "광고주",
+    "브랜드",
+    "브랜드명",
+    "클라이언트",
+  ],
+
+  campaign_product: [
+    "product",
+    "product_name",
+    "product name",
+    "제품",
+    "제품명",
+    "상품",
+    "상품명",
   ],
 };
 
@@ -603,11 +645,21 @@ export default function ExcelImport() {
           collaboration_rate:
             mapping.collaboration_rate
               ? normalizeNumber(
-                  row[
-                    mapping.collaboration_rate
-                  ]
+                  row[mapping.collaboration_rate]
                 )
               : null,
+
+          campaign_name: mapping.campaign_name
+            ? normalizeText(row[mapping.campaign_name]) || null
+            : null,
+
+          campaign_brand: mapping.campaign_brand
+            ? normalizeText(row[mapping.campaign_brand]) || null
+            : null,
+
+          campaign_product: mapping.campaign_product
+            ? normalizeText(row[mapping.campaign_product]) || null
+            : null,
         };
       })
       .filter((row) => row.instagram_id);
@@ -633,23 +685,17 @@ export default function ExcelImport() {
 
   const handleImport = async () => {
     if (!mapping.instagram_id) {
-      setMessage(
-        "Instagram ID 컬럼을 먼저 지정해주세요."
-      );
+      setMessage("Instagram ID 컬럼을 먼저 지정해주세요.");
       return;
     }
 
     if (mappedRows.length === 0) {
-      setMessage(
-        "업로드 가능한 인플루언서 데이터가 없습니다."
-      );
+      setMessage("업로드 가능한 인플루언서 데이터가 없습니다.");
       return;
     }
 
     if (!selectedFile) {
-      setMessage(
-        "Excel 파일을 다시 선택해주세요."
-      );
+      setMessage("Excel 파일을 다시 선택해주세요.");
       return;
     }
 
@@ -667,6 +713,28 @@ export default function ExcelImport() {
       if (userError || !user) {
         throw new Error("로그인이 필요합니다.");
       }
+
+      // 동일 Instagram ID가 여러 캠페인 때문에 여러 줄 있어도
+      // influencers에는 한 번만 저장합니다. 마지막 행의 최신 정보를 사용합니다.
+      const uniqueInfluencerRows = Array.from(
+        new Map(
+          mappedRows.map((row) => [
+            row.instagram_id.toLowerCase(),
+            row,
+          ])
+        ).values()
+      );
+
+      const influencerRowsForDb = uniqueInfluencerRows.map((row) => ({
+        name: row.name,
+        instagram_id: row.instagram_id,
+        instagram_url: row.instagram_url,
+        email: row.email,
+        followers: row.followers,
+        avg_views: row.avg_views,
+        category: row.category,
+        collaboration_rate: row.collaboration_rate,
+      }));
 
       const { data: batch, error: batchError } =
         await supabase
@@ -692,12 +760,8 @@ export default function ExcelImport() {
 
       batchId = batch.id;
 
-      const instagramIds = Array.from(
-        new Set(
-          mappedRows.map(
-            (row) => row.instagram_id
-          )
-        )
+      const instagramIds = uniqueInfluencerRows.map(
+        (row) => row.instagram_id
       );
 
       const { data: existingInfluencers, error: existingError } =
@@ -714,26 +778,22 @@ export default function ExcelImport() {
         string,
         Record<string, unknown>
       >(
-        (existingInfluencers ?? []).map(
-          (item) => [
-            item.instagram_id as string,
-            item as Record<string, unknown>,
-          ]
-        )
+        (existingInfluencers ?? []).map((item) => [
+          String(item.instagram_id).toLowerCase(),
+          item as Record<string, unknown>,
+        ])
       );
 
-      const insertedCount = mappedRows.filter(
-        (row) =>
-          !existingMap.has(row.instagram_id)
+      const insertedCount = uniqueInfluencerRows.filter(
+        (row) => !existingMap.has(row.instagram_id.toLowerCase())
       ).length;
-
       const updatedCount =
-        mappedRows.length - insertedCount;
+        uniqueInfluencerRows.length - insertedCount;
 
       const { data: savedInfluencers, error: upsertError } =
         await supabase
           .from("influencers")
-          .upsert(mappedRows, {
+          .upsert(influencerRowsForDb, {
             onConflict: "instagram_id",
           })
           .select("*");
@@ -746,37 +806,243 @@ export default function ExcelImport() {
         string,
         Record<string, unknown>
       >(
-        (savedInfluencers ?? []).map(
-          (item) => [
-            item.instagram_id as string,
-            item as Record<string, unknown>,
-          ]
-        )
+        (savedInfluencers ?? []).map((item) => [
+          String(item.instagram_id).toLowerCase(),
+          item as Record<string, unknown>,
+        ])
       );
 
-      const batchItems = mappedRows.map(
-        (row) => {
-          const existing =
-            existingMap.get(row.instagram_id);
-
-          const saved =
-            savedMap.get(row.instagram_id);
-
-          return {
-            batch_id: batchId,
-            influencer_id:
-              typeof saved?.id === "string"
-                ? saved.id
-                : null,
-            instagram_id: row.instagram_id,
-            operation: existing
-              ? "updated"
-              : "inserted",
-            before_data: existing ?? null,
-            imported_data: row,
-          };
+      // Excel의 캠페인명을 기준으로 기존 캠페인을 찾고,
+      // 없는 캠페인만 새로 생성합니다.
+      const campaignMetaMap = new Map<
+        string,
+        {
+          name: string;
+          brand: string | null;
+          product: string | null;
         }
+      >();
+
+      for (const row of mappedRows) {
+        if (!row.campaign_name) continue;
+
+        const key = row.campaign_name.trim().toLowerCase();
+        const previous = campaignMetaMap.get(key);
+
+        campaignMetaMap.set(key, {
+          name: row.campaign_name.trim(),
+          brand: row.campaign_brand ?? previous?.brand ?? null,
+          product: row.campaign_product ?? previous?.product ?? null,
+        });
+      }
+
+      const { data: existingCampaigns, error: campaignLoadError } =
+        await supabase
+          .from("campaigns")
+          .select("id, name, brand, product");
+
+      if (campaignLoadError) {
+        throw new Error(
+          `캠페인 조회 실패: ${campaignLoadError.message}`
+        );
+      }
+
+      const campaignMap = new Map<
+        string,
+        { id: string; name: string }
+      >(
+        (existingCampaigns ?? []).map((campaign) => [
+          String(campaign.name).trim().toLowerCase(),
+          {
+            id: campaign.id as string,
+            name: campaign.name as string,
+          },
+        ])
       );
+
+      const missingCampaignRows = Array.from(
+        campaignMetaMap.entries()
+      )
+        .filter(([key]) => !campaignMap.has(key))
+        .map(([, campaign]) => ({
+          name: campaign.name,
+          brand: campaign.brand,
+          product: campaign.product,
+          status: "completed",
+        }));
+
+      let createdCampaignIds: string[] = [];
+
+      if (missingCampaignRows.length > 0) {
+        const { data: createdCampaigns, error: campaignInsertError } =
+          await supabase
+            .from("campaigns")
+            .insert(missingCampaignRows)
+            .select("id, name");
+
+        if (campaignInsertError) {
+          throw new Error(
+            `신규 캠페인 생성 실패: ${campaignInsertError.message}`
+          );
+        }
+
+        createdCampaignIds = (createdCampaigns ?? []).map(
+          (campaign) => campaign.id as string
+        );
+
+        for (const campaign of createdCampaigns ?? []) {
+          campaignMap.set(
+            String(campaign.name).trim().toLowerCase(),
+            {
+              id: campaign.id as string,
+              name: campaign.name as string,
+            }
+          );
+        }
+      }
+
+      // 같은 인플루언서가 여러 캠페인에 등장하는 경우
+      // campaign_influencers에 캠페인별로 각각 연결합니다.
+      const campaignLinkMap = new Map<
+        string,
+        {
+          campaign_id: string;
+          influencer_id: string;
+          status: string;
+          final_rate: number | null;
+        }
+      >();
+
+      for (const row of mappedRows) {
+        if (!row.campaign_name) continue;
+
+        const saved = savedMap.get(
+          row.instagram_id.toLowerCase()
+        );
+        const influencerId =
+          typeof saved?.id === "string" ? saved.id : null;
+        const campaign = campaignMap.get(
+          row.campaign_name.trim().toLowerCase()
+        );
+
+        if (!influencerId || !campaign) continue;
+
+        const key = `${campaign.id}::${influencerId}`;
+        campaignLinkMap.set(key, {
+          campaign_id: campaign.id,
+          influencer_id: influencerId,
+          status: "candidate",
+          final_rate: row.collaboration_rate,
+        });
+      }
+
+      const campaignLinks = Array.from(campaignLinkMap.values());
+      const createdLinkCampaignIdsByInfluencer =
+        new Map<string, string[]>();
+
+      if (campaignLinks.length > 0) {
+        const campaignIds = Array.from(
+          new Set(campaignLinks.map((row) => row.campaign_id))
+        );
+        const influencerIds = Array.from(
+          new Set(campaignLinks.map((row) => row.influencer_id))
+        );
+
+        const { data: existingLinks, error: existingLinksError } =
+          await supabase
+            .from("campaign_influencers")
+            .select("campaign_id, influencer_id")
+            .in("campaign_id", campaignIds)
+            .in("influencer_id", influencerIds);
+
+        if (existingLinksError) {
+          throw new Error(
+            `캠페인 연결 조회 실패: ${existingLinksError.message}`
+          );
+        }
+
+        const existingLinkKeys = new Set(
+          (existingLinks ?? []).map(
+            (row) => `${row.campaign_id}::${row.influencer_id}`
+          )
+        );
+
+        const newLinks = campaignLinks.filter(
+          (row) =>
+            !existingLinkKeys.has(
+              `${row.campaign_id}::${row.influencer_id}`
+            )
+        );
+
+        if (newLinks.length > 0) {
+          const { error: linkInsertError } =
+            await supabase
+              .from("campaign_influencers")
+              .insert(newLinks);
+
+          if (linkInsertError) {
+            throw new Error(
+              `캠페인 인플루언서 연결 실패: ${linkInsertError.message}`
+            );
+          }
+
+          for (const link of newLinks) {
+            const current =
+              createdLinkCampaignIdsByInfluencer.get(
+                link.influencer_id
+              ) ?? [];
+            current.push(link.campaign_id);
+            createdLinkCampaignIdsByInfluencer.set(
+              link.influencer_id,
+              current
+            );
+          }
+        }
+      }
+
+      const batchItems = uniqueInfluencerRows.map((row, index) => {
+        const existing = existingMap.get(
+          row.instagram_id.toLowerCase()
+        );
+        const saved = savedMap.get(
+          row.instagram_id.toLowerCase()
+        );
+        const influencerId =
+          typeof saved?.id === "string" ? saved.id : null;
+
+        const relatedCampaigns = mappedRows
+          .filter(
+            (item) =>
+              item.instagram_id.toLowerCase() ===
+              row.instagram_id.toLowerCase()
+          )
+          .filter((item) => item.campaign_name)
+          .map((item) => ({
+            campaign_name: item.campaign_name,
+            collaboration_rate: item.collaboration_rate,
+          }));
+
+        return {
+          batch_id: batchId,
+          influencer_id: influencerId,
+          instagram_id: row.instagram_id,
+          operation: existing ? "updated" : "inserted",
+          before_data: existing ?? null,
+          imported_data: {
+            ...row,
+            campaign_history: relatedCampaigns,
+            __import_meta: {
+              created_link_campaign_ids: influencerId
+                ? createdLinkCampaignIdsByInfluencer.get(
+                    influencerId
+                  ) ?? []
+                : [],
+              created_campaign_ids:
+                index === 0 ? createdCampaignIds : [],
+            },
+          },
+        };
+      });
 
       const { error: itemError } =
         await supabase
@@ -805,8 +1071,11 @@ export default function ExcelImport() {
         );
       }
 
+      const duplicateCount =
+        mappedRows.length - uniqueInfluencerRows.length;
+
       setMessage(
-        `${mappedRows.length.toLocaleString()}명의 인플루언서를 DB에 반영했습니다. 신규 ${insertedCount.toLocaleString()}명, 기존 업데이트 ${updatedCount.toLocaleString()}명입니다.`
+        `Excel ${mappedRows.length.toLocaleString()}행을 처리해 ${uniqueInfluencerRows.length.toLocaleString()}명의 인플루언서를 DB에 반영했습니다. 신규 ${insertedCount.toLocaleString()}명, 기존 업데이트 ${updatedCount.toLocaleString()}명, 중복 행 ${duplicateCount.toLocaleString()}개 병합, 신규 캠페인 ${createdCampaignIds.length.toLocaleString()}개 생성, 캠페인 연결 ${campaignLinks.length.toLocaleString()}건을 확인했습니다.`
       );
 
       await loadImportHistory();
@@ -822,16 +1091,11 @@ export default function ExcelImport() {
       if (batchId) {
         await supabase
           .from("import_batches")
-          .update({
-            status: "failed",
-          })
+          .update({ status: "failed" })
           .eq("id", batchId);
       }
 
-      setMessage(
-        `DB 반영 실패: ${errorMessage}`
-      );
-
+      setMessage(`DB 반영 실패: ${errorMessage}`);
       await loadImportHistory();
     } finally {
       setLoading(false);
@@ -932,6 +1196,52 @@ export default function ExcelImport() {
         (item) => item.operation === "updated"
       );
 
+      const createdCampaignIds = Array.from(
+        new Set(
+          (items as BatchItem[]).flatMap((item) => {
+            const meta = (
+              item.imported_data as {
+                __import_meta?: {
+                  created_campaign_ids?: string[];
+                };
+              } | null
+            )?.__import_meta;
+
+            return meta?.created_campaign_ids ?? [];
+          })
+        )
+      );
+
+      for (const item of items as BatchItem[]) {
+        if (!item.influencer_id) continue;
+
+        const meta = (
+          item.imported_data as {
+            __import_meta?: {
+              created_link_campaign_ids?: string[];
+            };
+          } | null
+        )?.__import_meta;
+
+        const campaignIds =
+          meta?.created_link_campaign_ids ?? [];
+
+        if (campaignIds.length === 0) continue;
+
+        const { error: linkDeleteError } =
+          await supabase
+            .from("campaign_influencers")
+            .delete()
+            .eq("influencer_id", item.influencer_id)
+            .in("campaign_id", campaignIds);
+
+        if (linkDeleteError) {
+          throw new Error(
+            `캠페인 연결 되돌리기 실패: ${linkDeleteError.message}`
+          );
+        }
+      }
+
       // 기존 인플루언서는 업로드 직전 값으로 복원
       for (const item of updatedItems) {
         if (
@@ -987,6 +1297,37 @@ export default function ExcelImport() {
           throw new Error(
             `@${item.instagram_id} 삭제 실패: ${deleteError.message}`
           );
+        }
+      }
+
+      for (const campaignId of createdCampaignIds) {
+        const { count, error: countError } =
+          await supabase
+            .from("campaign_influencers")
+            .select("id", {
+              count: "exact",
+              head: true,
+            })
+            .eq("campaign_id", campaignId);
+
+        if (countError) {
+          throw new Error(
+            `신규 캠페인 정리 확인 실패: ${countError.message}`
+          );
+        }
+
+        if ((count ?? 0) === 0) {
+          const { error: campaignDeleteError } =
+            await supabase
+              .from("campaigns")
+              .delete()
+              .eq("id", campaignId);
+
+          if (campaignDeleteError) {
+            throw new Error(
+              `신규 캠페인 되돌리기 실패: ${campaignDeleteError.message}`
+            );
+          }
         }
       }
 
@@ -1285,6 +1626,10 @@ export default function ExcelImport() {
                       평균 조회수
                     </th>
 
+                    <th className="px-4 py-3 text-left">
+                      캠페인
+                    </th>
+
                     <th className="px-4 py-3 text-right">
                       협업 단가
                     </th>
@@ -1325,6 +1670,10 @@ export default function ExcelImport() {
                             "-"}
                         </td>
 
+                        <td className="px-4 py-3">
+                          {row.campaign_name || "-"}
+                        </td>
+
                         <td className="px-4 py-3 text-right">
                           {formatPriceMan(
                             row.collaboration_rate
@@ -1352,7 +1701,7 @@ export default function ExcelImport() {
               </p>
 
               <p className="mt-1 text-sm text-slate-500">
-                기존 Instagram ID가 있으면 해당 인플루언서 정보를 업데이트하며, 업로드 이력이 저장되어 나중에 되돌릴 수 있습니다.
+                같은 Instagram ID가 여러 행에 있어도 인플루언서는 1명으로 병합합니다. 캠페인명이 있으면 기존 캠페인과 연결하고, 없는 캠페인은 자동 생성합니다.
               </p>
             </div>
 
