@@ -563,6 +563,39 @@ function buildChannelUrl(
 
 
 
+function chunkArray<T>(items: T[], size = 100): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+
+function normalizeCampaignKeyPart(value: string | null | undefined) {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function campaignIdentityKey({
+  name,
+  brand,
+  product,
+}: {
+  name: string | null | undefined;
+  brand: string | null | undefined;
+  product: string | null | undefined;
+}) {
+  return [
+    normalizeCampaignKeyPart(brand),
+    normalizeCampaignKeyPart(product),
+    normalizeCampaignKeyPart(name),
+  ].join("::");
+}
+
+
 export default function ExcelImport() {
   const supabase = createClient();
   const router = useRouter();
@@ -1002,22 +1035,29 @@ export default function ExcelImport() {
         )
       );
 
-      const { data: existingChannels, error: channelLoadError } =
-        handles.length > 0
-          ? await supabase
-              .from("influencer_channels")
-              .select(
-                "id, influencer_id, platform, channel_name, handle, url, followers, avg_views, collaboration_rate, is_primary, memo"
-              )
-              .in("handle", handles)
-          : { data: [], error: null };
+      const existingChannels: any[] = [];
 
-      if (channelLoadError) {
-        throw new Error(channelLoadError.message);
+      for (const handleChunk of chunkArray(handles, 100)) {
+        const { data, error } = await supabase
+          .from("influencer_channels")
+          .select(
+            "id, influencer_id, platform, channel_name, handle, url, followers, avg_views, collaboration_rate, is_primary, memo"
+          )
+          .in("handle", handleChunk);
+
+        if (error) {
+          throw new Error(
+            `기존 채널 조회 실패: ${error.message}${
+              error.details ? ` / ${error.details}` : ""
+            }`
+          );
+        }
+
+        existingChannels.push(...(data ?? []));
       }
 
       const existingChannelMap = new Map(
-        (existingChannels ?? []).map((channel) => [
+        existingChannels.map((channel) => [
           `${channel.platform}::${String(channel.handle ?? "").toLowerCase()}`,
           channel,
         ])
@@ -1192,22 +1232,29 @@ export default function ExcelImport() {
         new Set(channelRows.map((row) => row.influencer_id))
       );
 
-      const { data: currentChannels, error: currentChannelsError } =
-        influencerIds.length > 0
-          ? await supabase
-              .from("influencer_channels")
-              .select(
-                "id, influencer_id, platform, channel_name, handle, url, followers, avg_views, collaboration_rate, is_primary, memo"
-              )
-              .in("influencer_id", influencerIds)
-          : { data: [], error: null };
+      const currentChannels: any[] = [];
 
-      if (currentChannelsError) {
-        throw new Error(currentChannelsError.message);
+      for (const influencerIdChunk of chunkArray(influencerIds, 100)) {
+        const { data, error } = await supabase
+          .from("influencer_channels")
+          .select(
+            "id, influencer_id, platform, channel_name, handle, url, followers, avg_views, collaboration_rate, is_primary, memo"
+          )
+          .in("influencer_id", influencerIdChunk);
+
+        if (error) {
+          throw new Error(
+            `현재 채널 조회 실패: ${error.message}${
+              error.details ? ` / ${error.details}` : ""
+            }`
+          );
+        }
+
+        currentChannels.push(...(data ?? []));
       }
 
       const currentChannelByKey = new Map(
-        (currentChannels ?? []).map((channel) => [
+        currentChannels.map((channel) => [
           `${channel.influencer_id}::${channel.platform}`,
           channel,
         ])
@@ -1248,18 +1295,25 @@ export default function ExcelImport() {
       }
 
       // 모든 채널을 다시 조회한 뒤 팔로워/구독자가 가장 높은 채널을 대표 채널로 설정
-      const { data: allChannels, error: allChannelsError } =
-        influencerIds.length > 0
-          ? await supabase
-              .from("influencer_channels")
-              .select(
-                "id, influencer_id, platform, handle, url, followers, avg_views, collaboration_rate"
-              )
-              .in("influencer_id", influencerIds)
-          : { data: [], error: null };
+      const allChannels: any[] = [];
 
-      if (allChannelsError) {
-        throw new Error(allChannelsError.message);
+      for (const influencerIdChunk of chunkArray(influencerIds, 100)) {
+        const { data, error } = await supabase
+          .from("influencer_channels")
+          .select(
+            "id, influencer_id, platform, handle, url, followers, avg_views, collaboration_rate"
+          )
+          .in("influencer_id", influencerIdChunk);
+
+        if (error) {
+          throw new Error(
+            `전체 채널 재조회 실패: ${error.message}${
+              error.details ? ` / ${error.details}` : ""
+            }`
+          );
+        }
+
+        allChannels.push(...(data ?? []));
       }
 
       /*
@@ -1270,7 +1324,7 @@ export default function ExcelImport() {
        *     YouTube Shorts / BDC / PPL
        */
       const channelIdByKey = new Map(
-        (allChannels ?? []).map((channel) => [
+        allChannels.map((channel) => [
           `${channel.influencer_id}::${channel.platform}`,
           channel.id,
         ])
@@ -1332,7 +1386,7 @@ export default function ExcelImport() {
       }
 
       for (const influencerId of influencerIds) {
-        const channels = (allChannels ?? []).filter(
+        const channels = allChannels.filter(
           (channel) =>
             channel.influencer_id === influencerId
         );
@@ -1408,8 +1462,11 @@ export default function ExcelImport() {
       for (const row of mappedRows) {
         if (!row.campaign_name) continue;
 
-        const key =
-          row.campaign_name.trim().toLowerCase();
+        const key = campaignIdentityKey({
+          name: row.campaign_name,
+          brand: row.campaign_brand,
+          product: row.campaign_product,
+        });
         const previous = campaignMetaMap.get(key);
 
         campaignMetaMap.set(key, {
@@ -1438,13 +1495,24 @@ export default function ExcelImport() {
 
       const campaignMap = new Map<
         string,
-        { id: string; name: string }
+        {
+          id: string;
+          name: string;
+          brand: string | null;
+          product: string | null;
+        }
       >(
         (existingCampaigns ?? []).map((campaign) => [
-          String(campaign.name).trim().toLowerCase(),
+          campaignIdentityKey({
+            name: campaign.name as string | null,
+            brand: campaign.brand as string | null,
+            product: campaign.product as string | null,
+          }),
           {
             id: campaign.id as string,
             name: campaign.name as string,
+            brand: (campaign.brand as string | null) ?? null,
+            product: (campaign.product as string | null) ?? null,
           },
         ])
       );
@@ -1469,7 +1537,7 @@ export default function ExcelImport() {
         } = await supabase
           .from("campaigns")
           .insert(missingCampaignRows)
-          .select("id, name");
+          .select("id, name, brand, product");
 
         if (campaignInsertError) {
           throw new Error(
@@ -1483,12 +1551,16 @@ export default function ExcelImport() {
 
         for (const campaign of createdCampaigns ?? []) {
           campaignMap.set(
-            String(campaign.name)
-              .trim()
-              .toLowerCase(),
+            campaignIdentityKey({
+              name: campaign.name as string | null,
+              brand: campaign.brand as string | null,
+              product: campaign.product as string | null,
+            }),
             {
               id: campaign.id as string,
               name: campaign.name as string,
+              brand: (campaign.brand as string | null) ?? null,
+              product: (campaign.product as string | null) ?? null,
             }
           );
         }
@@ -1513,9 +1585,11 @@ export default function ExcelImport() {
           personKey(row)
         );
         const campaign = campaignMap.get(
-          row.campaign_name
-            .trim()
-            .toLowerCase()
+          campaignIdentityKey({
+            name: row.campaign_name,
+            brand: row.campaign_brand,
+            product: row.campaign_product,
+          })
         );
 
         if (!influencerId || !campaign) continue;
@@ -1562,23 +1636,41 @@ export default function ExcelImport() {
           )
         );
 
-        const {
-          data: existingLinks,
-          error: existingLinksError,
-        } = await supabase
-          .from("campaign_influencers")
-          .select("campaign_id, influencer_id")
-          .in("campaign_id", campaignIds)
-          .in("influencer_id", linkedInfluencerIds);
+        const existingLinks: Array<{
+          campaign_id: string;
+          influencer_id: string;
+        }> = [];
 
-        if (existingLinksError) {
-          throw new Error(
-            `캠페인 연결 조회 실패: ${existingLinksError.message}`
-          );
+        /*
+         * 캠페인 ID와 인플루언서 ID를 한 번에 큰 .in()으로 보내면
+         * GET 요청 URL이 너무 길어져 400 Bad Request가 날 수 있습니다.
+         * 양쪽을 모두 작은 묶음으로 나눠 조회합니다.
+         */
+        for (const campaignIdChunk of chunkArray(campaignIds, 50)) {
+          for (const influencerIdChunk of chunkArray(
+            linkedInfluencerIds,
+            50
+          )) {
+            const { data, error } = await supabase
+              .from("campaign_influencers")
+              .select("campaign_id, influencer_id")
+              .in("campaign_id", campaignIdChunk)
+              .in("influencer_id", influencerIdChunk);
+
+            if (error) {
+              throw new Error(
+                `캠페인 연결 조회 실패: ${error.message}${
+                  error.details ? ` / ${error.details}` : ""
+                }`
+              );
+            }
+
+            existingLinks.push(...(data ?? []));
+          }
         }
 
         const existingLinkKeys = new Set(
-          (existingLinks ?? []).map(
+          existingLinks.map(
             (row) =>
               `${row.campaign_id}::${row.influencer_id}`
           )
@@ -1820,40 +1912,87 @@ export default function ExcelImport() {
         );
       }
 
-      const { data: items, error: itemError } =
-        await supabase
-          .from("import_batch_items")
-          .select("*")
-          .eq("batch_id", batch.id)
-          .order("created_at", {
-            ascending: false,
-          });
+      /*
+       * import_batch_items는 Supabase의 단일 select 반환 제한 때문에
+       * 1,000건을 초과하면 일부만 읽힐 수 있습니다.
+       * 500건씩 페이지네이션해서 해당 배치의 전체 항목을 가져옵니다.
+       */
+      const items: BatchItem[] = [];
+      const REVERT_PAGE_SIZE = 500;
+      let revertFrom = 0;
 
-      if (itemError) {
-        throw new Error(itemError.message);
+      while (true) {
+        const { data: pageItems, error: itemError } =
+          await supabase
+            .from("import_batch_items")
+            .select("*")
+            .eq("batch_id", batch.id)
+            .order("created_at", {
+              ascending: false,
+            })
+            .order("id", {
+              ascending: false,
+            })
+            .range(
+              revertFrom,
+              revertFrom + REVERT_PAGE_SIZE - 1
+            );
+
+        if (itemError) {
+          throw new Error(
+            `업로드 상세 기록 조회 실패: ${itemError.message}`
+          );
+        }
+
+        if (!pageItems || pageItems.length === 0) {
+          break;
+        }
+
+        items.push(...(pageItems as BatchItem[]));
+
+        if (pageItems.length < REVERT_PAGE_SIZE) {
+          break;
+        }
+
+        revertFrom += REVERT_PAGE_SIZE;
       }
 
-      if (!items || items.length === 0) {
+      if (items.length === 0) {
         throw new Error(
           "이 업로드에 연결된 상세 기록이 없습니다."
         );
       }
 
-      const insertedItems = (
-        items as BatchItem[]
-      ).filter(
+      /*
+       * import_batches에 기록된 신규/업데이트 수와 실제 로드된
+       * import_batch_items 수가 다르면 불완전한 되돌리기를 막습니다.
+       */
+      const expectedItemCount =
+        (batch.inserted_rows ?? 0) +
+        (batch.updated_rows ?? 0);
+
+      if (
+        expectedItemCount > 0 &&
+        items.length !== expectedItemCount
+      ) {
+        throw new Error(
+          `되돌리기 대상 조회 건수가 일치하지 않습니다. ` +
+            `예상 ${expectedItemCount.toLocaleString()}건 / ` +
+            `조회 ${items.length.toLocaleString()}건`
+        );
+      }
+
+      const insertedItems = items.filter(
         (item) => item.operation === "inserted"
       );
 
-      const updatedItems = (
-        items as BatchItem[]
-      ).filter(
+      const updatedItems = items.filter(
         (item) => item.operation === "updated"
       );
 
       const createdCampaignIds = Array.from(
         new Set(
-          (items as BatchItem[]).flatMap((item) => {
+          items.flatMap((item) => {
             const meta = (
               item.imported_data as {
                 __import_meta?: {
@@ -1867,7 +2006,7 @@ export default function ExcelImport() {
         )
       );
 
-      for (const item of items as BatchItem[]) {
+      for (const item of items) {
         if (!item.influencer_id) continue;
 
         const meta = (

@@ -152,9 +152,11 @@ function getCollaborationRate(influencer: Influencer) {
 export default function InfluencerTable({
   influencers,
   currentUserName,
+  totalRegisteredInfluencers,
 }: {
   influencers: Influencer[];
   currentUserName: string | null;
+  totalRegisteredInfluencers: number;
 }) {
   const supabase = createClient();
   const router = useRouter();
@@ -196,10 +198,49 @@ export default function InfluencerTable({
     useState(false);
 
   /*
+   * 과거 Import에서 동일 채널이 서로 다른 influencers 행에 연결된 경우가 있어
+   * 마케터 목록에서는 동일한 플랫폼 + 아이디를 한 번만 보여줍니다.
+   *
+   * 채널이 없는 legacy 행은 instagram_id를 기준으로 묶고,
+   * 식별 가능한 채널 정보가 전혀 없는 행만 개별 ID를 유지합니다.
+   */
+  const uniqueInfluencers = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Influencer[] = [];
+
+    for (const influencer of influencers) {
+      const primary = getPrimaryChannel(influencer);
+
+      const platform =
+        primary?.platform ??
+        (influencer.instagram_id ? "instagram" : null);
+
+      const handle =
+        primary?.handle ??
+        influencer.instagram_id ??
+        null;
+
+      const key =
+        platform && handle
+          ? `${platform}::${handle.trim().toLowerCase()}`
+          : `influencer::${influencer.id}`;
+
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      result.push(influencer);
+    }
+
+    return result;
+  }, [influencers]);
+
+  /*
    * 카테고리 목록
    */
   const categories = useMemo(() => {
-    const values = influencers.flatMap(
+    const values = uniqueInfluencers.flatMap(
       (item) =>
         item.categories?.length
           ? item.categories
@@ -211,7 +252,7 @@ export default function InfluencerTable({
     return [
       ...new Set(values),
     ].sort();
-  }, [influencers]);
+  }, [uniqueInfluencers]);
 
   /*
    * 검색 + 필터 + 정렬
@@ -238,7 +279,7 @@ export default function InfluencerTable({
           : null;
 
       const result =
-        influencers.filter(
+        uniqueInfluencers.filter(
           (influencer) => {
             /*
              * 채널 정보 검색
@@ -409,7 +450,7 @@ export default function InfluencerTable({
 
       return result;
     }, [
-      influencers,
+      uniqueInfluencers,
       search,
       category,
       platformFilter,
@@ -603,7 +644,7 @@ export default function InfluencerTable({
           </p>
 
           <p className="mt-1 text-2xl font-bold text-slate-900">
-            {influencers.length.toLocaleString()}
+            {totalRegisteredInfluencers.toLocaleString()}
           </p>
         </div>
 
@@ -623,9 +664,7 @@ export default function InfluencerTable({
           </p>
 
           <p className="mt-1 text-2xl font-bold text-slate-900">
-            {
-              categories.length
-            }
+            {categories.length}
           </p>
         </div>
       </div>
