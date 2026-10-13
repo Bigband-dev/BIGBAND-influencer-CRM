@@ -596,6 +596,92 @@ function campaignIdentityKey({
 }
 
 
+type InvalidImportRow = {
+  excelRow: number;
+  reason: string;
+  platformRaw: string;
+  handleRaw: string;
+  channelNameRaw: string;
+  urlRaw: string;
+};
+
+function analyzeImportRowValidity(
+  row: RawRow,
+  mapping: Mapping,
+  excelRow: number
+): InvalidImportRow | null {
+  const platformRaw = mapping.platform
+    ? normalizeText(row[mapping.platform])
+    : "";
+
+  const urlRaw = mapping.channel_url
+    ? normalizeText(row[mapping.channel_url])
+    : "";
+
+  const channelNameRaw = mapping.channel_name
+    ? normalizeText(row[mapping.channel_name])
+    : "";
+
+  const handleSource = mapping.channel_handle
+    ? row[mapping.channel_handle]
+    : urlRaw;
+
+  const handleRaw = normalizeText(handleSource);
+
+  const explicitPlatform = mapping.platform
+    ? normalizePlatformValue(row[mapping.platform])
+    : null;
+
+  const platform =
+    explicitPlatform ??
+    detectPlatformFromUrl(urlRaw) ??
+    detectPlatformFromMappedHeader(
+      mapping.channel_handle,
+      mapping.channel_url
+    );
+
+  const channelHandle =
+    extractChannelHandle(handleSource, platform);
+
+  const channelUrl = buildChannelUrl(
+    platform,
+    channelHandle,
+    urlRaw
+  );
+
+  const reasons: string[] = [];
+
+  if (!platform) {
+    reasons.push(
+      platformRaw
+        ? `채널 값 인식 불가 (${platformRaw})`
+        : "채널/플랫폼 정보 없음"
+    );
+  }
+
+  if (!channelHandle && !channelUrl) {
+    reasons.push("아이디와 계정 URL이 모두 없음");
+  }
+
+  if (!channelNameRaw && !channelHandle) {
+    reasons.push("계정명과 아이디가 모두 없음");
+  }
+
+  if (reasons.length === 0) {
+    return null;
+  }
+
+  return {
+    excelRow,
+    reason: reasons.join(" / "),
+    platformRaw,
+    handleRaw,
+    channelNameRaw,
+    urlRaw,
+  };
+}
+
+
 export default function ExcelImport() {
   const supabase = createClient();
   const router = useRouter();
@@ -948,8 +1034,22 @@ export default function ExcelImport() {
     viewsUnit,
   ]);
 
-  const invalidCount =
-    rawRows.length - mappedRows.length;
+  const invalidRows = useMemo(() => {
+    return rawRows
+      .map((row, index) =>
+        analyzeImportRowValidity(
+          row,
+          mapping,
+          index + 2
+        )
+      )
+      .filter(
+        (item): item is InvalidImportRow =>
+          item !== null
+      );
+  }, [rawRows, mapping]);
+
+  const invalidCount = invalidRows.length;
 
   const updateMapping = (
     field: FieldKey,
@@ -1027,6 +1127,8 @@ export default function ExcelImport() {
         personRowsMap.set(key, current);
       }
 
+      setMessage("1/5 기존 데이터 확인 중...");
+
       const handles = Array.from(
         new Set(
           mappedRows
@@ -1035,9 +1137,13 @@ export default function ExcelImport() {
         )
       );
 
+      /*
+       * 기존 채널을 묶음 조회합니다.
+       * 기존 버전처럼 인플루언서마다 추가 select를 보내지 않습니다.
+       */
       const existingChannels: any[] = [];
 
-      for (const handleChunk of chunkArray(handles, 100)) {
+      for (const handleChunk of chunkArray(handles, 200)) {
         const { data, error } = await supabase
           .from("influencer_channels")
           .select(
@@ -1058,8 +1164,49 @@ export default function ExcelImport() {
 
       const existingChannelMap = new Map(
         existingChannels.map((channel) => [
-          `${channel.platform}::${String(channel.handle ?? "").toLowerCase()}`,
+          `${channel.platform}::${String(
+            channel.handle ?? ""
+          ).toLowerCase()}`,
           channel,
+        ])
+      );
+
+      /*
+       * 기존 채널이 가리키는 influencer를 한 번에 가져옵니다.
+       * 예전 코드는 채널마다 .single()을 호출해 대량 업로드 시 매우 느렸습니다.
+       */
+      const existingInfluencerIds = Array.from(
+        new Set(
+          existingChannels
+            .map((channel) => channel.influencer_id)
+            .filter(Boolean)
+        )
+      );
+
+      const existingInfluencers: any[] = [];
+
+      for (const idChunk of chunkArray(
+        existingInfluencerIds,
+        200
+      )) {
+        const { data, error } = await supabase
+          .from("influencers")
+          .select("*")
+          .in("id", idChunk);
+
+        if (error) {
+          throw new Error(
+            `기존 인플루언서 조회 실패: ${error.message}`
+          );
+        }
+
+        existingInfluencers.push(...(data ?? []));
+      }
+
+      const existingInfluencerMap = new Map(
+        existingInfluencers.map((item) => [
+          item.id,
+          item,
         ])
       );
 
@@ -1070,6 +1217,15 @@ export default function ExcelImport() {
         Record<string, unknown> | null
       >();
 
+      /*
+       * 신규 ID는 브라우저에서 UUID를 미리 생성합니다.
+       * 그래서 신규/기존을 모두 한 번의 bulk upsert 흐름으로 저장할 수 있습니다.
+       */
+      const influencerPayloadMap = new Map<
+        string,
+        Record<string, any>
+      >();
+
       for (const [key, rows] of personRowsMap) {
         const latest = rows[rows.length - 1];
         const instagramRow = rows.find(
@@ -1078,42 +1234,54 @@ export default function ExcelImport() {
 
         let existing: Record<string, any> | null = null;
 
-        if (!existing) {
-          for (const row of rows) {
-            const channel = existingChannelMap.get(
-              `${row.platform}::${row.channel_handle.toLowerCase()}`
-            );
+        for (const row of rows) {
+          const channel = existingChannelMap.get(
+            `${row.platform}::${row.channel_handle.toLowerCase()}`
+          );
 
-            if (channel?.influencer_id) {
-              const { data: influencerByChannel } =
-                await supabase
-                  .from("influencers")
-                  .select("*")
-                  .eq("id", channel.influencer_id)
-                  .single();
+          if (channel?.influencer_id) {
+            existing =
+              existingInfluencerMap.get(
+                channel.influencer_id
+              ) ?? null;
 
-              if (influencerByChannel) {
-                existing = influencerByChannel;
-                break;
-              }
-            }
+            if (existing) break;
           }
         }
 
+        const influencerId =
+          existing?.id ?? crypto.randomUUID();
+
+        personIdMap.set(key, influencerId);
+
+        if (existing?.id) {
+          beforeInfluencerMap.set(
+            influencerId,
+            existing as Record<string, unknown>
+          );
+        } else {
+          insertedInfluencerIds.add(influencerId);
+          beforeInfluencerMap.set(influencerId, null);
+        }
+
         const payload = {
-          // 실명은 Excel에서 받지 않고 기존 UI 호환용 표시명으로 계정명을 사용합니다.
+          id: influencerId,
           name:
             latest.channel_name ??
             latest.channel_handle,
           email:
             rows
-              .map((row) => contactPointToEmail(row.contact_point))
+              .map((row) =>
+                contactPointToEmail(row.contact_point)
+              )
               .find(Boolean) ??
             existing?.email ??
             null,
           phone:
             rows
-              .map((row) => contactPointToPhone(row.contact_point))
+              .map((row) =>
+                contactPointToPhone(row.contact_point)
+              )
               .find(Boolean) ??
             existing?.phone ??
             null,
@@ -1123,7 +1291,8 @@ export default function ExcelImport() {
             null,
           memo: buildImportMemo(
             existing?.memo ?? null,
-            rows.find((row) => row.contact_point)?.contact_point ?? null,
+            rows.find((row) => row.contact_point)
+              ?.contact_point ?? null,
             rows.find((row) => row.note)?.note ?? null
           ),
           instagram_id:
@@ -1134,57 +1303,57 @@ export default function ExcelImport() {
             instagramRow?.channel_url ||
             existing?.instagram_url ||
             null,
+          followers:
+            latest.followers ??
+            existing?.followers ??
+            null,
+          avg_views:
+            latest.avg_views ??
+            existing?.avg_views ??
+            null,
+          collaboration_rate:
+            existing?.collaboration_rate ?? null,
         };
 
-        if (existing?.id) {
-          beforeInfluencerMap.set(
-            existing.id,
-            existing as Record<string, unknown>
+        influencerPayloadMap.set(
+          influencerId,
+          payload
+        );
+      }
+
+      setMessage(
+        `2/5 인플루언서 ${influencerPayloadMap.size.toLocaleString()}명 일괄 저장 중...`
+      );
+
+      const influencerPayloads = Array.from(
+        influencerPayloadMap.values()
+      );
+
+      for (const payloadChunk of chunkArray(
+        influencerPayloads,
+        200
+      )) {
+        const { error } = await supabase
+          .from("influencers")
+          .upsert(payloadChunk, {
+            onConflict: "id",
+          });
+
+        if (error) {
+          throw new Error(
+            `인플루언서 일괄 저장 실패: ${error.message}`
           );
-
-          const { data: updated, error: updateError } =
-            await supabase
-              .from("influencers")
-              .update(payload)
-              .eq("id", existing.id)
-              .select("*")
-              .single();
-
-          if (updateError || !updated) {
-            throw new Error(
-              `인플루언서 업데이트 실패: ${
-                updateError?.message ?? "알 수 없는 오류"
-              }`
-            );
-          }
-
-          personIdMap.set(key, updated.id);
-        } else {
-          const { data: inserted, error: insertError } =
-            await supabase
-              .from("influencers")
-              .insert(payload)
-              .select("*")
-              .single();
-
-          if (insertError || !inserted) {
-            throw new Error(
-              `인플루언서 등록 실패: ${
-                insertError?.message ?? "알 수 없는 오류"
-              }`
-            );
-          }
-
-          personIdMap.set(key, inserted.id);
-          insertedInfluencerIds.add(inserted.id);
-          beforeInfluencerMap.set(inserted.id, null);
         }
       }
 
-      // 같은 사람 + 같은 플랫폼이 여러 줄이면 마지막 행을 채널 최신값으로 사용
+      /*
+       * 채널도 ID를 미리 지정한 뒤 bulk upsert 합니다.
+       * 기존 코드의 채널별 update/insert 반복을 제거했습니다.
+       */
       const uniqueChannelMap = new Map<
         string,
         {
+          id: string;
           influencer_id: string;
           platform: InfluencerPlatform;
           channel_name: string | null;
@@ -1194,6 +1363,7 @@ export default function ExcelImport() {
           avg_views: number | null;
           collaboration_rate: number | null;
           is_primary: boolean;
+          memo?: string | null;
         }
       >();
 
@@ -1205,9 +1375,20 @@ export default function ExcelImport() {
         );
         if (!influencerId) continue;
 
+        const channelLookupKey =
+          `${row.platform}::${row.channel_handle.toLowerCase()}`;
+
+        const existingChannel =
+          existingChannelMap.get(channelLookupKey);
+
+        const channelId =
+          existingChannel?.id ??
+          crypto.randomUUID();
+
         uniqueChannelMap.set(
           `${influencerId}::${row.platform}`,
           {
+            id: channelId,
             influencer_id: influencerId,
             platform: row.platform,
             channel_name:
@@ -1218,8 +1399,12 @@ export default function ExcelImport() {
             url: row.channel_url,
             followers: row.followers,
             avg_views: row.avg_views,
-            collaboration_rate: null,
+            collaboration_rate:
+              existingChannel?.collaboration_rate ??
+              null,
+            // 먼저 전부 false로 넣고, 아래에서 대표 채널만 묶음 지정합니다.
             is_primary: false,
+            memo: existingChannel?.memo ?? null,
           }
         );
       }
@@ -1228,82 +1413,53 @@ export default function ExcelImport() {
         uniqueChannelMap.values()
       );
 
-      const influencerIds = Array.from(
-        new Set(channelRows.map((row) => row.influencer_id))
+      setMessage(
+        `3/5 채널 ${channelRows.length.toLocaleString()}개 일괄 저장 중...`
       );
 
-      const currentChannels: any[] = [];
+      for (const channelChunk of chunkArray(
+        channelRows,
+        200
+      )) {
+        const { error } = await supabase
+          .from("influencer_channels")
+          .upsert(channelChunk, {
+            onConflict: "id",
+          });
 
-      for (const influencerIdChunk of chunkArray(influencerIds, 100)) {
+        if (error) {
+          throw new Error(
+            `채널 일괄 저장 실패: ${error.message}`
+          );
+        }
+      }
+
+      const influencerIds = Array.from(
+        new Set(
+          channelRows.map(
+            (row) => row.influencer_id
+          )
+        )
+      );
+
+      /*
+       * affected influencer의 모든 채널을 묶음 조회해서 대표 채널을 계산합니다.
+       */
+      const allChannels: any[] = [];
+
+      for (const influencerIdChunk of chunkArray(
+        influencerIds,
+        200
+      )) {
         const { data, error } = await supabase
           .from("influencer_channels")
           .select(
             "id, influencer_id, platform, channel_name, handle, url, followers, avg_views, collaboration_rate, is_primary, memo"
           )
-          .in("influencer_id", influencerIdChunk);
-
-        if (error) {
-          throw new Error(
-            `현재 채널 조회 실패: ${error.message}${
-              error.details ? ` / ${error.details}` : ""
-            }`
+          .in(
+            "influencer_id",
+            influencerIdChunk
           );
-        }
-
-        currentChannels.push(...(data ?? []));
-      }
-
-      const currentChannelByKey = new Map(
-        currentChannels.map((channel) => [
-          `${channel.influencer_id}::${channel.platform}`,
-          channel,
-        ])
-      );
-
-      for (const row of channelRows) {
-        const key = `${row.influencer_id}::${row.platform}`;
-        const existing = currentChannelByKey.get(key);
-
-        if (existing?.id) {
-          const { error } = await supabase
-            .from("influencer_channels")
-            .update({
-              channel_name: row.channel_name,
-              handle: row.handle,
-              url: row.url,
-              followers: row.followers,
-              avg_views: row.avg_views,
-            })
-            .eq("id", existing.id);
-
-          if (error) {
-            throw new Error(
-              `채널 업데이트 실패: ${error.message}`
-            );
-          }
-        } else {
-          const { error } = await supabase
-            .from("influencer_channels")
-            .insert(row);
-
-          if (error) {
-            throw new Error(
-              `채널 등록 실패: ${error.message}`
-            );
-          }
-        }
-      }
-
-      // 모든 채널을 다시 조회한 뒤 팔로워/구독자가 가장 높은 채널을 대표 채널로 설정
-      const allChannels: any[] = [];
-
-      for (const influencerIdChunk of chunkArray(influencerIds, 100)) {
-        const { data, error } = await supabase
-          .from("influencer_channels")
-          .select(
-            "id, influencer_id, platform, handle, url, followers, avg_views, collaboration_rate"
-          )
-          .in("influencer_id", influencerIdChunk);
 
         if (error) {
           throw new Error(
@@ -1316,12 +1472,156 @@ export default function ExcelImport() {
         allChannels.push(...(data ?? []));
       }
 
+      const channelsByInfluencer = new Map<
+        string,
+        any[]
+      >();
+
+      for (const channel of allChannels) {
+        const rows =
+          channelsByInfluencer.get(
+            channel.influencer_id
+          ) ?? [];
+        rows.push(channel);
+        channelsByInfluencer.set(
+          channel.influencer_id,
+          rows
+        );
+      }
+
+      const primaryChannelIds: string[] = [];
+
+      for (const influencerId of influencerIds) {
+        const channels =
+          channelsByInfluencer.get(
+            influencerId
+          ) ?? [];
+
+        if (channels.length === 0) continue;
+
+        const primary = [...channels].sort(
+          (a, b) =>
+            (Number(b.followers) || 0) -
+            (Number(a.followers) || 0)
+        )[0];
+
+        if (primary?.id) {
+          primaryChannelIds.push(primary.id);
+        }
+      }
+
+      /*
+       * 대표 채널 지정도 사람별 2회 update가 아니라,
+       * 200명 단위의 묶음 update로 처리합니다.
+       */
+      for (const influencerIdChunk of chunkArray(
+        influencerIds,
+        200
+      )) {
+        const { error } = await supabase
+          .from("influencer_channels")
+          .update({ is_primary: false })
+          .in(
+            "influencer_id",
+            influencerIdChunk
+          );
+
+        if (error) {
+          throw new Error(
+            `대표 채널 초기화 실패: ${error.message}`
+          );
+        }
+      }
+
+      for (const primaryIdChunk of chunkArray(
+        primaryChannelIds,
+        200
+      )) {
+        const { error } = await supabase
+          .from("influencer_channels")
+          .update({ is_primary: true })
+          .in("id", primaryIdChunk);
+
+        if (error) {
+          throw new Error(
+            `대표 채널 지정 실패: ${error.message}`
+          );
+        }
+      }
+
+      /*
+       * legacy 필드 동기화도 influencer별 update 대신 bulk upsert 합니다.
+       */
+      const legacySyncRows: Record<
+        string,
+        any
+      >[] = [];
+
+      for (const influencerId of influencerIds) {
+        const channels =
+          channelsByInfluencer.get(
+            influencerId
+          ) ?? [];
+
+        if (channels.length === 0) continue;
+
+        const primary = [...channels].sort(
+          (a, b) =>
+            (Number(b.followers) || 0) -
+            (Number(a.followers) || 0)
+        )[0];
+
+        const instagram = channels.find(
+          (channel) =>
+            channel.platform === "instagram"
+        );
+
+        const basePayload =
+          influencerPayloadMap.get(
+            influencerId
+          );
+
+        if (!basePayload) continue;
+
+        legacySyncRows.push({
+          ...basePayload,
+          followers:
+            primary?.followers ?? null,
+          avg_views:
+            primary?.avg_views ?? null,
+          collaboration_rate:
+            primary?.collaboration_rate ??
+            null,
+          instagram_id:
+            instagram?.handle ??
+            basePayload.instagram_id ??
+            null,
+          instagram_url:
+            instagram?.url ??
+            basePayload.instagram_url ??
+            null,
+        });
+      }
+
+      for (const syncChunk of chunkArray(
+        legacySyncRows,
+        200
+      )) {
+        const { error } = await supabase
+          .from("influencers")
+          .upsert(syncChunk, {
+            onConflict: "id",
+          });
+
+        if (error) {
+          throw new Error(
+            `대표 채널 정보 일괄 동기화 실패: ${error.message}`
+          );
+        }
+      }
+
       /*
        * 콘텐츠 유형별 협업 단가 저장
-       *
-       * 동일 채널 + 동일 콘텐츠 유형은 마지막 Excel 행의 값을 사용합니다.
-       * 예: Instagram Feed / Reels / Story
-       *     YouTube Shorts / BDC / PPL
        */
       const channelIdByKey = new Map(
         allChannels.map((channel) => [
@@ -1359,7 +1659,8 @@ export default function ExcelImport() {
             `${channelId}::${entry.content_type}`,
             {
               channel_id: channelId,
-              content_type: entry.content_type,
+              content_type:
+                entry.content_type,
               rate: entry.rate,
             }
           );
@@ -1370,84 +1671,25 @@ export default function ExcelImport() {
         rateMap.values()
       );
 
-      if (rateRows.length > 0) {
-        const { error: rateUpsertError } =
-          await supabase
-            .from("influencer_channel_rates")
-            .upsert(rateRows, {
-              onConflict: "channel_id,content_type",
-            });
+      for (const rateChunk of chunkArray(
+        rateRows,
+        300
+      )) {
+        const { error } = await supabase
+          .from("influencer_channel_rates")
+          .upsert(rateChunk, {
+            onConflict:
+              "channel_id,content_type",
+          });
 
-        if (rateUpsertError) {
+        if (error) {
           throw new Error(
-            `콘텐츠 유형별 단가 저장 실패: ${rateUpsertError.message}`
+            `콘텐츠 유형별 단가 저장 실패: ${error.message}`
           );
         }
       }
 
-      for (const influencerId of influencerIds) {
-        const channels = allChannels.filter(
-          (channel) =>
-            channel.influencer_id === influencerId
-        );
-
-        if (channels.length === 0) continue;
-
-        const primary = [...channels].sort(
-          (a, b) =>
-            (Number(b.followers) || 0) -
-            (Number(a.followers) || 0)
-        )[0];
-
-        const { error: clearPrimaryError } =
-          await supabase
-            .from("influencer_channels")
-            .update({ is_primary: false })
-            .eq("influencer_id", influencerId);
-
-        if (clearPrimaryError) {
-          throw new Error(
-            `대표 채널 초기화 실패: ${clearPrimaryError.message}`
-          );
-        }
-
-        const { error: setPrimaryError } =
-          await supabase
-            .from("influencer_channels")
-            .update({ is_primary: true })
-            .eq("id", primary.id);
-
-        if (setPrimaryError) {
-          throw new Error(
-            `대표 채널 지정 실패: ${setPrimaryError.message}`
-          );
-        }
-
-        const instagram = channels.find(
-          (channel) => channel.platform === "instagram"
-        );
-
-        const { error: legacySyncError } =
-          await supabase
-            .from("influencers")
-            .update({
-              followers: primary.followers,
-              avg_views: primary.avg_views,
-              collaboration_rate:
-                primary.collaboration_rate,
-              instagram_id:
-                instagram?.handle ?? null,
-              instagram_url:
-                instagram?.url ?? null,
-            })
-            .eq("id", influencerId);
-
-        if (legacySyncError) {
-          throw new Error(
-            `대표 채널 정보 동기화 실패: ${legacySyncError.message}`
-          );
-        }
-      }
+      setMessage("4/5 캠페인 정보 처리 중...");
 
       // 캠페인 자동 생성/연결
       const campaignMetaMap = new Map<
@@ -1684,15 +1926,20 @@ export default function ExcelImport() {
         );
 
         if (newLinks.length > 0) {
-          const { error: linkInsertError } =
-            await supabase
-              .from("campaign_influencers")
-              .insert(newLinks);
+          for (const linkChunk of chunkArray(
+            newLinks,
+            300
+          )) {
+            const { error: linkInsertError } =
+              await supabase
+                .from("campaign_influencers")
+                .insert(linkChunk);
 
-          if (linkInsertError) {
-            throw new Error(
-              `캠페인 인플루언서 연결 실패: ${linkInsertError.message}`
-            );
+            if (linkInsertError) {
+              throw new Error(
+                `캠페인 인플루언서 연결 실패: ${linkInsertError.message}`
+              );
+            }
           }
 
           for (const link of newLinks) {
@@ -1775,15 +2022,22 @@ export default function ExcelImport() {
         };
       });
 
-      const { error: itemError } =
-        await supabase
-          .from("import_batch_items")
-          .insert(batchItems);
+      setMessage("5/5 업로드 이력 저장 및 마무리 중...");
 
-      if (itemError) {
-        throw new Error(
-          `업로드 내역 저장 실패: ${itemError.message}`
-        );
+      for (const itemChunk of chunkArray(
+        batchItems,
+        300
+      )) {
+        const { error: itemError } =
+          await supabase
+            .from("import_batch_items")
+            .insert(itemChunk);
+
+        if (itemError) {
+          throw new Error(
+            `업로드 내역 저장 실패: ${itemError.message}`
+          );
+        }
       }
 
       const insertedCount =
@@ -2402,6 +2656,64 @@ export default function ExcelImport() {
                 </span>
               )}
             </div>
+
+            {invalidRows.length > 0 && (
+              <div className="border-b border-amber-200 bg-amber-50 px-6 py-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-amber-900">
+                      확인이 필요한 Excel 행
+                    </p>
+                    <p className="mt-1 text-xs text-amber-700">
+                      아래 행은 업로드 대상에서 제외됩니다. Excel 원본의 행 번호를 확인해
+                      채널 / 아이디 / 계정명 / 계정 URL 값을 수정해주세요.
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-300">
+                    {invalidRows.length.toLocaleString()}개
+                  </span>
+                </div>
+
+                <div className="mt-3 max-h-64 overflow-auto rounded-lg border border-amber-200 bg-white">
+                  <table className="w-full min-w-[900px] text-xs">
+                    <thead className="sticky top-0 bg-amber-100 text-amber-900">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Excel 행</th>
+                        <th className="px-3 py-2 text-left">사유</th>
+                        <th className="px-3 py-2 text-left">채널 원본값</th>
+                        <th className="px-3 py-2 text-left">아이디 원본값</th>
+                        <th className="px-3 py-2 text-left">계정명 원본값</th>
+                        <th className="px-3 py-2 text-left">계정 URL 원본값</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-amber-100">
+                      {invalidRows.map((item) => (
+                        <tr key={item.excelRow}>
+                          <td className="px-3 py-2 font-semibold text-amber-900">
+                            {item.excelRow}
+                          </td>
+                          <td className="px-3 py-2 text-amber-800">
+                            {item.reason}
+                          </td>
+                          <td className="px-3 py-2 text-slate-600">
+                            {item.platformRaw || "-"}
+                          </td>
+                          <td className="px-3 py-2 text-slate-600">
+                            {item.handleRaw || "-"}
+                          </td>
+                          <td className="px-3 py-2 text-slate-600">
+                            {item.channelNameRaw || "-"}
+                          </td>
+                          <td className="max-w-[320px] break-all px-3 py-2 text-slate-600">
+                            {item.urlRaw || "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             <div className="max-h-[500px] overflow-auto">
               <table className="w-full min-w-[1400px] text-sm">
