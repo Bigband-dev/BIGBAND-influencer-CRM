@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 type AuditLog = {
   id: string;
@@ -48,6 +48,12 @@ export default function AuditLogTable({
 
   const [expandedId, setExpandedId] =
     useState<string | null>(null);
+
+  const [page, setPage] =
+    useState(1);
+
+  const [pageSize, setPageSize] =
+    useState(50);
 
   const tableNames = useMemo(
     () =>
@@ -152,10 +158,41 @@ export default function AuditLogTable({
     actorFilter,
   ]);
 
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredLogs.length / pageSize)
+  );
+
+  useEffect(() => {
+    setPage(1);
+    setExpandedId(null);
+  }, [
+    search,
+    actionFilter,
+    tableFilter,
+    actorFilter,
+    pageSize,
+  ]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  const paginatedLogs = useMemo(() => {
+    const start = (page - 1) * pageSize;
+
+    return filteredLogs.slice(
+      start,
+      start + pageSize
+    );
+  }, [filteredLogs, page, pageSize]);
+
   return (
     <div className="space-y-5">
       <section className="rounded-xl border-2 border-slate-400 bg-white p-5">
-        <div className="grid gap-3 lg:grid-cols-[1fr_180px_220px_220px]">
+        <div className="grid gap-3 lg:grid-cols-[1fr_180px_220px_220px_160px]">
           <input
             type="text"
             value={search}
@@ -242,6 +279,27 @@ export default function AuditLogTable({
               )
             )}
           </select>
+
+          <select
+            value={pageSize}
+            onChange={(e) =>
+              setPageSize(
+                Number(e.target.value)
+              )
+            }
+            className="rounded-lg border border-slate-400 bg-white px-3 py-2.5 text-sm"
+            aria-label="페이지당 활동 로그 수"
+          >
+            <option value={25}>
+              25개씩 보기
+            </option>
+            <option value={50}>
+              50개씩 보기
+            </option>
+            <option value={100}>
+              100개씩 보기
+            </option>
+          </select>
         </div>
       </section>
 
@@ -281,7 +339,7 @@ export default function AuditLogTable({
             </thead>
 
             <tbody className="divide-y divide-slate-300">
-              {filteredLogs.map(
+              {paginatedLogs.map(
                 (log) => {
                   const expanded =
                     expandedId ===
@@ -373,6 +431,61 @@ export default function AuditLogTable({
             </tbody>
           </table>
         </div>
+
+        {filteredLogs.length > 0 && (
+          <div className="flex flex-col gap-3 border-t border-slate-200 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-500">
+              {(
+                (page - 1) * pageSize + 1
+              ).toLocaleString()}
+              -
+              {Math.min(
+                page * pageSize,
+                filteredLogs.length
+              ).toLocaleString()}
+              개 / 총{" "}
+              {filteredLogs.length.toLocaleString()}개
+            </p>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPage((prev) =>
+                    Math.max(1, prev - 1)
+                  );
+                  setExpandedId(null);
+                }}
+                disabled={page === 1}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                이전
+              </button>
+
+              <span className="min-w-[90px] text-center text-sm text-slate-600">
+                {page.toLocaleString()} /{" "}
+                {totalPages.toLocaleString()}
+              </span>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setPage((prev) =>
+                    Math.min(
+                      totalPages,
+                      prev + 1
+                    )
+                  );
+                  setExpandedId(null);
+                }}
+                disabled={page === totalPages}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                다음
+              </button>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );

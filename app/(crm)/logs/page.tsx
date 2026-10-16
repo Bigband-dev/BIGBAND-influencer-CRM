@@ -6,15 +6,45 @@ export const instant = false;
 export default async function LogsPage() {
   const supabase = await createClient();
 
-  const { data: logs, error } = await supabase
-    .from("audit_logs")
-    .select("*")
-    .order("created_at", {
-      ascending: false,
-    })
-    .limit(500);
+  /*
+   * 활동 로그는 500건을 넘을 수 있으므로
+   * 500건씩 끝까지 페이지네이션해서 가져옵니다.
+   */
+  const logs: any[] = [];
+  const LOG_PAGE_SIZE = 500;
+  let logFrom = 0;
+  let logLoadError: Error | null = null;
 
-  if (error) {
+  while (true) {
+    const { data, error } = await supabase
+      .from("audit_logs")
+      .select("*")
+      .order("created_at", {
+        ascending: false,
+      })
+      .order("id", {
+        ascending: false,
+      })
+      .range(
+        logFrom,
+        logFrom + LOG_PAGE_SIZE - 1
+      );
+
+    if (error) {
+      logLoadError = new Error(error.message);
+      break;
+    }
+
+    logs.push(...(data ?? []));
+
+    if (!data || data.length < LOG_PAGE_SIZE) {
+      break;
+    }
+
+    logFrom += LOG_PAGE_SIZE;
+  }
+
+  if (logLoadError) {
     return (
       <div className="mx-auto max-w-7xl px-8 py-8">
         <h1 className="text-3xl font-bold">
@@ -22,7 +52,7 @@ export default async function LogsPage() {
         </h1>
 
         <p className="mt-4 text-red-600">
-          {error.message}
+          {logLoadError.message}
         </p>
       </div>
     );
@@ -30,7 +60,7 @@ export default async function LogsPage() {
 
   const actorIds = Array.from(
     new Set(
-      (logs ?? [])
+      logs
         .map((log) => log.actor_id)
         .filter(
           (id): id is string =>
@@ -62,7 +92,7 @@ export default async function LogsPage() {
     ])
   );
 
-  const rows = (logs ?? []).map((log) => {
+  const rows = logs.map((log) => {
     const actor = log.actor_id
       ? profileMap.get(log.actor_id)
       : undefined;

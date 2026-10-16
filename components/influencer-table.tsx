@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 
@@ -196,6 +196,9 @@ export default function InfluencerTable({
 
   const [deleting, setDeleting] =
     useState(false);
+
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
   /*
    * 과거 Import에서 동일 채널이 서로 다른 influencers 행에 연결된 경우가 있어
@@ -460,6 +463,41 @@ export default function InfluencerTable({
     ]);
 
   /*
+   * 페이지네이션
+   * 검색/필터/정렬 결과를 기준으로 50개씩 보여줍니다.
+   */
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredInfluencers.length / pageSize)
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [
+    search,
+    category,
+    platformFilter,
+    minFollowers,
+    maxFollowers,
+    sort,
+    pageSize,
+  ]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  const paginatedInfluencers = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredInfluencers.slice(
+      start,
+      start + pageSize
+    );
+  }, [filteredInfluencers, page, pageSize]);
+
+  /*
    * 필터 초기화
    */
   const resetFilters = () => {
@@ -479,13 +517,10 @@ export default function InfluencerTable({
    * 체크박스
    */
   const allVisibleSelected =
-    filteredInfluencers.length >
-      0 &&
-    filteredInfluencers.every(
+    paginatedInfluencers.length > 0 &&
+    paginatedInfluencers.every(
       (item) =>
-        selectedIds.includes(
-          item.id
-        )
+        selectedIds.includes(item.id)
     );
 
   const toggleSelect = (
@@ -508,7 +543,7 @@ export default function InfluencerTable({
   const toggleSelectAll =
     () => {
       const visibleIds =
-        filteredInfluencers.map(
+        paginatedInfluencers.map(
           (item) =>
             item.id
         );
@@ -808,7 +843,20 @@ export default function InfluencerTable({
           />
         </div>
 
-        <div className="mt-3 flex justify-end">
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+          <select
+            value={pageSize}
+            onChange={(e) =>
+              setPageSize(Number(e.target.value))
+            }
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+            aria-label="페이지당 표시 개수"
+          >
+            <option value={25}>25명씩 보기</option>
+            <option value={50}>50명씩 보기</option>
+            <option value={100}>100명씩 보기</option>
+          </select>
+
           <select
             value={sort}
             onChange={(e) =>
@@ -946,7 +994,7 @@ export default function InfluencerTable({
             </thead>
 
             <tbody className="divide-y divide-slate-300">
-              {filteredInfluencers.map(
+              {paginatedInfluencers.map(
                 (
                   influencer
                 ) => {
@@ -1217,6 +1265,59 @@ export default function InfluencerTable({
             </tbody>
           </table>
         </div>
+
+        {filteredInfluencers.length > 0 && (
+          <div className="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-500">
+              {(
+                (page - 1) * pageSize + 1
+              ).toLocaleString()}
+              -
+              {Math.min(
+                page * pageSize,
+                filteredInfluencers.length
+              ).toLocaleString()}
+              명 / 총{" "}
+              {filteredInfluencers.length.toLocaleString()}명
+            </p>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setPage((prev) =>
+                    Math.max(1, prev - 1)
+                  )
+                }
+                disabled={page === 1}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                이전
+              </button>
+
+              <span className="min-w-[90px] text-center text-sm text-slate-600">
+                {page.toLocaleString()} /{" "}
+                {totalPages.toLocaleString()}
+              </span>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setPage((prev) =>
+                    Math.min(
+                      totalPages,
+                      prev + 1
+                    )
+                  )
+                }
+                disabled={page === totalPages}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                다음
+              </button>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );

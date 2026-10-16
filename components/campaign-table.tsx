@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatPriceMan } from "@/lib/format-number";
 import { CAMPAIGN_INFLUENCER_STATUS } from "@/lib/campaign-status";
@@ -62,6 +62,8 @@ export default function CampaignTable({
 }) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
   const filteredCampaigns = useMemo(() => {
     const keyword = search.toLowerCase().trim();
@@ -80,6 +82,29 @@ export default function CampaignTable({
       return searchMatch && statusMatch;
     });
   }, [campaigns, search, status]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredCampaigns.length / pageSize)
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, status, pageSize]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  const paginatedCampaigns = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredCampaigns.slice(
+      start,
+      start + pageSize
+    );
+  }, [filteredCampaigns, page, pageSize]);
 
   const ongoingCount = campaigns.filter(
     (campaign) =>
@@ -131,7 +156,7 @@ export default function CampaignTable({
 
       {/* 검색/필터 */}
       <section className="rounded-2xl border border-slate-500 bg-white p-6 shadow-sm">
-        <div className="grid gap-3 md:grid-cols-[1fr_220px]">
+        <div className="grid gap-3 md:grid-cols-[1fr_220px_160px]">
           <input
             type="text"
             value={search}
@@ -168,6 +193,17 @@ export default function CampaignTable({
             <option value="cancelled">
               취소
             </option>
+          </select>
+
+          <select
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            className="rounded-lg border border-slate-400 bg-white px-4 py-2.5 text-sm"
+            aria-label="페이지당 캠페인 수"
+          >
+            <option value={25}>25개씩 보기</option>
+            <option value={50}>50개씩 보기</option>
+            <option value={100}>100개씩 보기</option>
           </select>
         </div>
       </section>
@@ -212,7 +248,7 @@ export default function CampaignTable({
           </thead>
 
           <tbody className="divide-y divide-slate-300">
-            {filteredCampaigns.map((campaign) => {
+            {paginatedCampaigns.map((campaign) => {
                 const campaignMembers =
                   campaign.campaign_influencers ?? [];
 
@@ -283,6 +319,49 @@ export default function CampaignTable({
             )}
           </tbody>
         </table>
+
+        {filteredCampaigns.length > 0 && (
+          <div className="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-slate-500">
+              {((page - 1) * pageSize + 1).toLocaleString()}-
+              {Math.min(
+                page * pageSize,
+                filteredCampaigns.length
+              ).toLocaleString()}
+              개 / 총 {filteredCampaigns.length.toLocaleString()}개
+            </p>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setPage((prev) => Math.max(1, prev - 1))
+                }
+                disabled={page === 1}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                이전
+              </button>
+
+              <span className="min-w-[90px] text-center text-sm text-slate-600">
+                {page.toLocaleString()} / {totalPages.toLocaleString()}
+              </span>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setPage((prev) =>
+                    Math.min(totalPages, prev + 1)
+                  )
+                }
+                disabled={page === totalPages}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                다음
+              </button>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );

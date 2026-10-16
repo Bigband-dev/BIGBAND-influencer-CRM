@@ -29,33 +29,19 @@ export default async function CampaignDetailPage({
     notFound();
   }
 
-  const { data: influencers } =
-    await supabase
-      .from("influencers")
-      .select(`
-        id,
-        name,
-        instagram_id,
-        followers,
-        avg_views,
-        category,
-        collaboration_rate
-      `)
-      .order("followers", {
-        ascending: false,
-      });
+  /*
+   * Supabase/PostgREST의 단일 select 반환 제한을 피하기 위해
+   * 전체 인플루언서를 500명씩 끝까지 불러옵니다.
+   */
+  const influencers: any[] = [];
+  const INFLUENCER_PAGE_SIZE = 500;
+  let influencerFrom = 0;
 
-  const { data: campaignInfluencers } =
-    await supabase
-      .from("campaign_influencers")
-      .select(`
-        id,
-        influencer_id,
-        status,
-        proposed_rate,
-        final_rate,
-        memo,
-        influencers (
+  while (true) {
+    const { data, error: influencerLoadError } =
+      await supabase
+        .from("influencers")
+        .select(`
           id,
           name,
           instagram_id,
@@ -63,9 +49,87 @@ export default async function CampaignDetailPage({
           avg_views,
           category,
           collaboration_rate
-        )
-      `)
-      .eq("campaign_id", id);
+        `)
+        .order("followers", {
+          ascending: false,
+        })
+        .order("id", {
+          ascending: false,
+        })
+        .range(
+          influencerFrom,
+          influencerFrom + INFLUENCER_PAGE_SIZE - 1
+        );
+
+    if (influencerLoadError) {
+      throw new Error(
+        `인플루언서 목록 조회 실패: ${influencerLoadError.message}`
+      );
+    }
+
+    influencers.push(...(data ?? []));
+
+    if (!data || data.length < INFLUENCER_PAGE_SIZE) {
+      break;
+    }
+
+    influencerFrom += INFLUENCER_PAGE_SIZE;
+  }
+
+  /*
+   * 캠페인 연결도 1,000건 이상일 수 있으므로 동일하게 페이지네이션합니다.
+   */
+  const campaignInfluencers: any[] = [];
+  const CAMPAIGN_MEMBER_PAGE_SIZE = 500;
+  let campaignMemberFrom = 0;
+
+  while (true) {
+    const { data, error: campaignMemberLoadError } =
+      await supabase
+        .from("campaign_influencers")
+        .select(`
+          id,
+          influencer_id,
+          status,
+          proposed_rate,
+          final_rate,
+          memo,
+          influencers (
+            id,
+            name,
+            instagram_id,
+            followers,
+            avg_views,
+            category,
+            collaboration_rate
+          )
+        `)
+        .eq("campaign_id", id)
+        .order("id", {
+          ascending: true,
+        })
+        .range(
+          campaignMemberFrom,
+          campaignMemberFrom + CAMPAIGN_MEMBER_PAGE_SIZE - 1
+        );
+
+    if (campaignMemberLoadError) {
+      throw new Error(
+        `캠페인 인플루언서 조회 실패: ${campaignMemberLoadError.message}`
+      );
+    }
+
+    campaignInfluencers.push(...(data ?? []));
+
+    if (
+      !data ||
+      data.length < CAMPAIGN_MEMBER_PAGE_SIZE
+    ) {
+      break;
+    }
+
+    campaignMemberFrom += CAMPAIGN_MEMBER_PAGE_SIZE;
+  }
 
   const { data: campaignLogsRaw } = 
     await supabase

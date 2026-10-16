@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { formatMan } from "@/lib/format-number";
@@ -74,6 +74,11 @@ export default function CampaignInfluencerManager({
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const [removing, setRemoving] = useState(false);
 
+  const [pageSize, setPageSize] = useState(50);
+  const [candidatePage, setCandidatePage] = useState(1);
+  const [confirmedPage, setConfirmedPage] = useState(1);
+  const [availablePage, setAvailablePage] = useState(1);
+
   const existingIds = useMemo(
     () => new Set(campaignInfluencers.map((item) => item.influencer_id)),
     [campaignInfluencers]
@@ -103,6 +108,61 @@ export default function CampaignInfluencerManager({
       );
     });
   }, [influencers, existingIds, search]);
+
+  const paginate = <T,>(items: T[], page: number) => {
+    const start = (page - 1) * pageSize;
+    return items.slice(start, start + pageSize);
+  };
+
+  const candidateTotalPages = Math.max(
+    1,
+    Math.ceil(candidateInfluencers.length / pageSize)
+  );
+  const confirmedTotalPages = Math.max(
+    1,
+    Math.ceil(confirmedInfluencers.length / pageSize)
+  );
+  const availableTotalPages = Math.max(
+    1,
+    Math.ceil(availableInfluencers.length / pageSize)
+  );
+
+  const paginatedCandidates = useMemo(
+    () => paginate(candidateInfluencers, candidatePage),
+    [candidateInfluencers, candidatePage, pageSize]
+  );
+
+  const paginatedConfirmed = useMemo(
+    () => paginate(confirmedInfluencers, confirmedPage),
+    [confirmedInfluencers, confirmedPage, pageSize]
+  );
+
+  const paginatedAvailable = useMemo(
+    () => paginate(availableInfluencers, availablePage),
+    [availableInfluencers, availablePage, pageSize]
+  );
+
+  useEffect(() => {
+    setAvailablePage(1);
+  }, [search, pageSize]);
+
+  useEffect(() => {
+    setCandidatePage((page) =>
+      Math.min(page, candidateTotalPages)
+    );
+  }, [candidateTotalPages]);
+
+  useEffect(() => {
+    setConfirmedPage((page) =>
+      Math.min(page, confirmedTotalPages)
+    );
+  }, [confirmedTotalPages]);
+
+  useEffect(() => {
+    setAvailablePage((page) =>
+      Math.min(page, availableTotalPages)
+    );
+  }, [availableTotalPages]);
 
   const toggle = (id: string) => {
     setSelectedIds((prev) =>
@@ -233,10 +293,69 @@ export default function CampaignInfluencerManager({
     router.refresh();
   };
 
+  const renderPagination = (
+    totalItems: number,
+    page: number,
+    setPage: React.Dispatch<React.SetStateAction<number>>
+  ) => {
+    const totalPages = Math.max(
+      1,
+      Math.ceil(totalItems / pageSize)
+    );
+
+    if (totalItems === 0) return null;
+
+    return (
+      <div className="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-slate-500">
+          {((page - 1) * pageSize + 1).toLocaleString()}-
+          {Math.min(
+            page * pageSize,
+            totalItems
+          ).toLocaleString()}
+          명 / 총 {totalItems.toLocaleString()}명
+        </p>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              setPage((prev) => Math.max(1, prev - 1))
+            }
+            disabled={page === 1}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            이전
+          </button>
+
+          <span className="min-w-[90px] text-center text-sm text-slate-600">
+            {page.toLocaleString()} / {totalPages.toLocaleString()}
+          </span>
+
+          <button
+            type="button"
+            onClick={() =>
+              setPage((prev) =>
+                Math.min(totalPages, prev + 1)
+              )
+            }
+            disabled={page === totalPages}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            다음
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const renderCampaignTable = (
     title: string,
     description: string,
     items: CampaignInfluencer[],
+    pageItems: CampaignInfluencer[],
+    page: number,
+    setPage: React.Dispatch<React.SetStateAction<number>>,
     confirmed = false
   ) => (
     <section className="overflow-hidden rounded-xl border-2 border-slate-400 bg-white">
@@ -287,8 +406,8 @@ export default function CampaignInfluencerManager({
               <th className="w-12 px-4 py-3 text-center">
                 <input
                   type="checkbox"
-                  checked={areAllSelected(items)}
-                  onChange={() => toggleAll(items)}
+                  checked={areAllSelected(pageItems)}
+                  onChange={() => toggleAll(pageItems)}
                   aria-label={`${title} 전체 선택`}
                 />
               </th>
@@ -302,7 +421,7 @@ export default function CampaignInfluencerManager({
           </thead>
 
           <tbody className="divide-y divide-slate-300">
-            {items.map((item) => {
+            {pageItems.map((item) => {
               const influencer = Array.isArray(item.influencers)
                 ? item.influencers[0]
                 : item.influencers;
@@ -404,6 +523,12 @@ export default function CampaignInfluencerManager({
           </tbody>
         </table>
       </div>
+
+      {renderPagination(
+        items.length,
+        page,
+        setPage
+      )}
     </section>
   );
 
@@ -412,13 +537,19 @@ export default function CampaignInfluencerManager({
       {renderCampaignTable(
         "후보 인원",
         "컨택완료 이전 단계의 캠페인 후보입니다.",
-        candidateInfluencers
+        candidateInfluencers,
+        paginatedCandidates,
+        candidatePage,
+        setCandidatePage
       )}
 
       {renderCampaignTable(
         "확정 인원",
         "컨택완료 및 그 이후 단계의 인플루언서입니다.",
         confirmedInfluencers,
+        paginatedConfirmed,
+        confirmedPage,
+        setConfirmedPage,
         true
       )}
 
@@ -431,14 +562,29 @@ export default function CampaignInfluencerManager({
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={handleAdd}
-            disabled={adding || selectedIds.length === 0}
-            className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
-          >
-            {adding ? "추가 중..." : `${selectedIds.length}명 추가`}
-          </button>
+          <div className="flex items-center gap-2">
+            <select
+              value={pageSize}
+              onChange={(e) =>
+                setPageSize(Number(e.target.value))
+              }
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700"
+              aria-label="페이지당 표시 개수"
+            >
+              <option value={25}>25명씩 보기</option>
+              <option value={50}>50명씩 보기</option>
+              <option value={100}>100명씩 보기</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={handleAdd}
+              disabled={adding || selectedIds.length === 0}
+              className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              {adding ? "추가 중..." : `${selectedIds.length}명 추가`}
+            </button>
+          </div>
         </div>
 
         <input
@@ -452,7 +598,7 @@ export default function CampaignInfluencerManager({
         <div className="max-h-[450px] overflow-auto border border-slate-300">
           <table className="w-full text-sm">
             <tbody className="divide-y divide-slate-300">
-              {availableInfluencers.map((influencer) => (
+              {paginatedAvailable.map((influencer) => (
                 <tr key={influencer.id} className="hover:bg-slate-50">
                   <td className="w-12 px-4 py-3">
                     <input
@@ -491,6 +637,12 @@ export default function CampaignInfluencerManager({
             </tbody>
           </table>
         </div>
+
+        {renderPagination(
+          availableInfluencers.length,
+          availablePage,
+          setAvailablePage
+        )}
       </section>
     </div>
   );
