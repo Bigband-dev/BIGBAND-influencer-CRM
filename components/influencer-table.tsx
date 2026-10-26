@@ -17,6 +17,7 @@ import type {
 } from "@/types/influencer";
 
 import { buildGmailComposeUrl } from "@/lib/gmail-compose";
+import { exportSelectedInfluencersToXlsx } from "@/lib/export-influencers-xlsx";
 
 type Influencer = {
   id: string;
@@ -195,6 +196,9 @@ export default function InfluencerTable({
     useState<string[]>([]);
 
   const [deleting, setDeleting] =
+    useState(false);
+
+  const [exporting, setExporting] =
     useState(false);
 
   const [page, setPage] = useState(1);
@@ -621,6 +625,34 @@ export default function InfluencerTable({
     };
 
   /*
+   * 선택 Excel 다운로드
+   */
+  const handleExportSelected =
+    async () => {
+      if (selectedIds.length === 0) {
+        return;
+      }
+
+      setExporting(true);
+
+      try {
+        await exportSelectedInfluencersToXlsx({
+          supabase,
+          selectedIds,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Excel 다운로드 중 오류가 발생했습니다.";
+
+        alert(message);
+      } finally {
+        setExporting(false);
+      }
+    };
+
+  /*
    * 일괄 삭제
    */
   const handleBulkDelete =
@@ -903,9 +935,8 @@ export default function InfluencerTable({
             </p>
 
             <p className="mt-1 text-sm text-red-600">
-              선택한 인플루언서를
-              한 번에 삭제할
-              수 있습니다.
+              선택한 인플루언서를 Excel로 다운로드하거나
+              한 번에 삭제할 수 있습니다.
             </p>
           </div>
 
@@ -925,10 +956,25 @@ export default function InfluencerTable({
             <button
               type="button"
               onClick={
+                handleExportSelected
+              }
+              disabled={
+                exporting || deleting
+              }
+              className="rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {exporting
+                ? "Excel 생성 중..."
+                : "Excel 다운로드"}
+            </button>
+
+            <button
+              type="button"
+              onClick={
                 handleBulkDelete
               }
               disabled={
-                deleting
+                deleting || exporting
               }
               className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
             >
