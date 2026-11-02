@@ -44,6 +44,7 @@ export default async function CampaignDetailPage({
         .select(`
           id,
           name,
+          email,
           instagram_id,
           followers,
           avg_views,
@@ -90,7 +91,6 @@ export default async function CampaignDetailPage({
         .select(`
           id,
           influencer_id,
-          email,
           status,
           proposed_rate,
           final_rate,
@@ -98,6 +98,7 @@ export default async function CampaignDetailPage({
           influencers (
             id,
             name,
+            email,
             instagram_id,
             followers,
             avg_views,

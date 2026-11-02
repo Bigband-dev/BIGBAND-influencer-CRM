@@ -1,16 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { formatMan } from "@/lib/format-number";
 import { CAMPAIGN_INFLUENCER_STATUS } from "@/lib/campaign-status";
+import CampaignEmailModal, {
+  type CampaignEmailRecipient,
+} from "@/components/campaign-email-modal";
 
 type Influencer = {
   id: string;
   name: string | null;
-  email: string | null;
-  instagram_id: string;
+  email?: string | null;
+  instagram_id: string | null;
   followers: number | null;
   avg_views: number | null;
   category: string | null;
@@ -74,6 +83,7 @@ export default function CampaignInfluencerManager({
   const [adding, setAdding] = useState(false);
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const [removing, setRemoving] = useState(false);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
 
   const [pageSize, setPageSize] = useState(50);
   const [candidatePage, setCandidatePage] = useState(1);
@@ -250,6 +260,26 @@ export default function CampaignInfluencerManager({
     setSelectedCampaignIds((prev) => [...new Set([...prev, ...ids])]);
   };
 
+  const selectedEmailRecipients =
+    useMemo<CampaignEmailRecipient[]>(() => {
+      const selectedSet = new Set(selectedCampaignIds);
+
+      return campaignInfluencers
+        .filter((item) => selectedSet.has(item.id))
+        .map((item) => {
+          const influencer = Array.isArray(item.influencers)
+            ? item.influencers[0] ?? null
+            : item.influencers;
+
+          return {
+            campaignInfluencerId: item.id,
+            influencerId: item.influencer_id,
+            name: influencer?.name ?? null,
+            email: influencer?.email ?? null,
+          };
+        });
+    }, [campaignInfluencers, selectedCampaignIds]);
+
   const handleBulkRemove = async () => {
     if (selectedCampaignIds.length === 0 || removing) return;
 
@@ -297,7 +327,7 @@ export default function CampaignInfluencerManager({
   const renderPagination = (
     totalItems: number,
     page: number,
-    setPage: React.Dispatch<React.SetStateAction<number>>
+    setPage: Dispatch<SetStateAction<number>>
   ) => {
     const totalPages = Math.max(
       1,
@@ -356,7 +386,7 @@ export default function CampaignInfluencerManager({
     items: CampaignInfluencer[],
     pageItems: CampaignInfluencer[],
     page: number,
-    setPage: React.Dispatch<React.SetStateAction<number>>,
+    setPage: Dispatch<SetStateAction<number>>,
     confirmed = false
   ) => (
     <section className="overflow-hidden rounded-xl border-2 border-slate-400 bg-white">
@@ -386,6 +416,15 @@ export default function CampaignInfluencerManager({
             >
               선택 해제
             </button>
+            <button
+              type="button"
+              onClick={() => setEmailModalOpen(true)}
+              disabled={removing}
+              className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              선택 {selectedCampaignIds.length}명 메일
+            </button>
+
             <button
               type="button"
               onClick={handleBulkRemove}
@@ -497,7 +536,9 @@ export default function CampaignInfluencerManager({
                       onClick={() =>
                         handleRemove(
                           item.id,
-                          influencer.name || influencer.instagram_id
+                          influencer.name ||
+                            influencer.instagram_id ||
+                            "이름 없는 인플루언서"
                         )
                       }
                       className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
@@ -645,6 +686,17 @@ export default function CampaignInfluencerManager({
           setAvailablePage
         )}
       </section>
+
+      <CampaignEmailModal
+        open={emailModalOpen}
+        campaignId={campaignId}
+        recipients={selectedEmailRecipients}
+        onClose={() => setEmailModalOpen(false)}
+        onSent={() => {
+          setSelectedCampaignIds([]);
+          router.refresh();
+        }}
+      />
     </div>
   );
 }
