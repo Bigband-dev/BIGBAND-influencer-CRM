@@ -90,6 +90,7 @@ export default async function CampaignDetailPage({
         .select(`
           id,
           influencer_id,
+          email,
           status,
           proposed_rate,
           final_rate,

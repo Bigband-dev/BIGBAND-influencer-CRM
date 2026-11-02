@@ -9,6 +9,7 @@ import { CAMPAIGN_INFLUENCER_STATUS } from "@/lib/campaign-status";
 type Influencer = {
   id: string;
   name: string | null;
+  email: string | null;
   instagram_id: string;
   followers: number | null;
   avg_views: number | null;
