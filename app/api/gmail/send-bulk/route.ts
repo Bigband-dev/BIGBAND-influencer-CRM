@@ -237,10 +237,16 @@ export async function POST(request: NextRequest) {
     }
 
     const variables = {
+      인플루언서명: influencer.name?.trim() || "인플루언서",
+      브랜드: campaign.brand ?? "",
+      제품: campaign.product ?? "",
+      캠페인명: campaign.name ?? "",
+
+      // 기존 영어 템플릿도 계속 동작하도록 호환 유지
       name: influencer.name?.trim() || "인플루언서",
-      campaign: campaign.name ?? "",
       brand: campaign.brand ?? "",
       product: campaign.product ?? "",
+      campaign: campaign.name ?? "",
     };
 
     const previewSubject = replaceTemplate(
@@ -311,10 +317,16 @@ export async function POST(request: NextRequest) {
     }
 
     const variables = {
+      인플루언서명: influencerName,
+      브랜드: campaign.brand ?? "",
+      제품: campaign.product ?? "",
+      캠페인명: campaign.name ?? "",
+
+      // 기존 영어 템플릿도 계속 동작하도록 호환 유지
       name: influencerName,
-      campaign: campaign.name ?? "",
       brand: campaign.brand ?? "",
       product: campaign.product ?? "",
+      campaign: campaign.name ?? "",
     };
 
     const subject = replaceTemplate(subjectTemplate, variables);

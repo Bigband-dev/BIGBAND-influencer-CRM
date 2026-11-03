@@ -20,10 +20,10 @@ const DRAFT_PRESETS: DraftPreset[] = [
   {
     id: "collaboration",
     label: "협업 제안",
-    subject: "[{{brand}}] {{product}} 협업 제안",
-    body: `안녕하세요 {{name}}님,
+    subject: "[빅밴드] {{브랜드}} {{제품}} 협업 제안",
+    body: `안녕하세요 {{인플루언서명}}님,
 
-{{brand}} {{product}} 관련 협업 제안드리고자 연락드립니다.
+{{브랜드}} {{제품}} 관련 협업 제안드리고자 연락드립니다.
 
 협업 가능 여부와 일정 확인 후 회신 부탁드립니다.
 
@@ -32,10 +32,10 @@ const DRAFT_PRESETS: DraftPreset[] = [
   {
     id: "detail",
     label: "협업 상세 안내",
-    subject: "[{{brand}}] {{product}} 협업 상세 안내",
-    body: `안녕하세요 {{name}}님,
+    subject: "[빅밴드] {{브랜드}} {{제품}} 협업 상세 안내",
+    body: `안녕하세요 {{인플루언서명}}님,
 
-{{brand}} {{product}} 협업 관련 상세 내용 전달드립니다.
+{{브랜드}} {{제품}} 협업 관련 상세 내용 전달드립니다.
 
 내용 확인 후 편하게 회신 부탁드립니다.
 
@@ -359,7 +359,7 @@ export default function CampaignEmailModal({
                 />
 
                 <p className="mt-2 text-xs text-slate-500">
-                  캠페인명은 제목에 자동으로 강제하지 않습니다. 최종 제목을 직접 확인하고 수정한 뒤 발송하세요.
+                  최종 제목을 직접 확인하고 수정한 뒤 발송하세요!
                 </p>
               </div>
 
@@ -380,13 +380,71 @@ export default function CampaignEmailModal({
                 />
               </div>
 
+              <div className="rounded-xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-600">
+                <p className="font-semibold text-slate-800">
+                  각 정보가 의미하는 내용
+                </p>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <span className="font-semibold text-slate-700">
+                      {"{{인플루언서명}}"}
+                    </span>
+                    <span className="ml-2">
+                      선택한 인플루언서의 이름
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className="font-semibold text-slate-700">
+                      {"{{브랜드}}"}
+                    </span>
+                    <span className="ml-2">
+                      현재 캠페인에 등록된 브랜드명
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className="font-semibold text-slate-700">
+                      {"{{제품}}"}
+                    </span>
+                    <span className="ml-2">
+                      현재 캠페인에 등록된 제품명
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className="font-semibold text-slate-700">
+                      {"{{캠페인명}}"}
+                    </span>
+                    <span className="ml-2">
+                      현재 캠페인에 등록된 캠페인명
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <div className="rounded-xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">
-                사용할 수 있는 변수:
-                <strong className="ml-1 text-slate-700">
-                  {"{{name}}"}, {"{{campaign}}"}, {"{{brand}}"}, {"{{product}}"}
-                </strong>
-                <br />
-                미리보기와 실제 발송 시 각 수신자 정보로 자동 치환됩니다.
+                                <p className="font-semibold text-slate-700">
+                  사용 가능한 정보
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <span className="rounded-md border border-slate-200 bg-white px-2 py-1">
+                    {"{{인플루언서명}}"}
+                  </span>
+                  <span className="rounded-md border border-slate-200 bg-white px-2 py-1">
+                    {"{{브랜드}}"}
+                  </span>
+                  <span className="rounded-md border border-slate-200 bg-white px-2 py-1">
+                    {"{{제품}}"}
+                  </span>
+                  <span className="rounded-md border border-slate-200 bg-white px-2 py-1">
+                    {"{{캠페인명}}"}
+                  </span>
+                </div>
+                <p className="mt-2">
+                  미리보기와 실제 발송 시 각 인플루언서와 캠페인 정보가 자동으로 입력되어 전송됩니다.
+                </p>
               </div>
 
               <button
