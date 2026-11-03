@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { sendGmail } from "@/lib/google/gmail";
+import {
+  buildEmailHtml,
+  getGmailSignature,
+  sendGmail,
+} from "@/lib/google/gmail";
 
 type InfluencerRelation = {
   id: string;
@@ -30,9 +34,14 @@ function replaceTemplate(
   );
 }
 
+function getInfluencer(member: CampaignMemberRow) {
+  return Array.isArray(member.influencers)
+    ? member.influencers[0] ?? null
+    : member.influencers;
+}
+
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
-
   const {
     data: { user },
     error: userError,
@@ -46,6 +55,7 @@ export async function POST(request: NextRequest) {
   }
 
   let payload: {
+    mode?: "preview" | "send";
     campaignId?: string;
     campaignInfluencerIds?: string[];
     subject?: string;
@@ -61,6 +71,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const mode = payload.mode === "preview" ? "preview" : "send";
   const campaignId = String(payload.campaignId ?? "").trim();
   const campaignInfluencerIds = Array.from(
     new Set(
@@ -143,8 +154,11 @@ export async function POST(request: NextRequest) {
 
   const members: CampaignMemberRow[] = [];
 
-  // PostgREST URL 길이 문제 방지를 위해 100개씩 조회
-  for (let index = 0; index < campaignInfluencerIds.length; index += 100) {
+  for (
+    let index = 0;
+    index < campaignInfluencerIds.length;
+    index += 100
+  ) {
     const idChunk = campaignInfluencerIds.slice(index, index + 100);
 
     const {
@@ -166,9 +180,7 @@ export async function POST(request: NextRequest) {
 
     if (memberError) {
       return NextResponse.json(
-        {
-          error: `수신자 조회 실패: ${memberError.message}`,
-        },
+        { error: `수신자 조회 실패: ${memberError.message}` },
         { status: 500 }
       );
     }
@@ -179,6 +191,81 @@ export async function POST(request: NextRequest) {
   const memberMap = new Map(
     members.map((member) => [member.id, member])
   );
+
+  let signatureHtml = "";
+
+  try {
+    signatureHtml = await getGmailSignature({
+      refreshToken: connection.refresh_token,
+      email: connection.google_email,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Gmail 서명을 불러오지 못했습니다.";
+
+    return NextResponse.json(
+      {
+        error:
+          "Gmail 서명을 불러오지 못했습니다. " +
+          `OAuth에 gmail.settings.basic 권한이 포함되어 있는지 확인해주세요. (${message})`,
+      },
+      { status: 400 }
+    );
+  }
+
+  if (mode === "preview") {
+    const previewMember = campaignInfluencerIds
+      .map((id) => memberMap.get(id))
+      .find(Boolean);
+
+    if (!previewMember) {
+      return NextResponse.json(
+        { error: "미리보기할 수신자를 찾을 수 없습니다." },
+        { status: 404 }
+      );
+    }
+
+    const influencer = getInfluencer(previewMember);
+
+    if (!influencer) {
+      return NextResponse.json(
+        { error: "미리보기할 수신자를 찾을 수 없습니다." },
+        { status: 404 }
+      );
+    }
+
+    const variables = {
+      name: influencer.name?.trim() || "인플루언서",
+      campaign: campaign.name ?? "",
+      brand: campaign.brand ?? "",
+      product: campaign.product ?? "",
+    };
+
+    const previewSubject = replaceTemplate(
+      subjectTemplate,
+      variables
+    );
+    const previewBody = replaceTemplate(
+      bodyTemplate,
+      variables
+    );
+
+    return NextResponse.json({
+      success: true,
+      sender: connection.google_email,
+      recipientName: influencer.name,
+      recipientEmail: influencer.email,
+      subject: previewSubject,
+      body: previewBody,
+      html: buildEmailHtml({
+        body: previewBody,
+        signatureHtml,
+      }),
+      hasSignature: Boolean(signatureHtml.trim()),
+    });
+  }
 
   const results: Array<{
     campaignInfluencerId: string;
@@ -204,12 +291,8 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    const influencer = Array.isArray(member.influencers)
-      ? member.influencers[0] ?? null
-      : member.influencers;
-
-    const influencerId =
-      influencer?.id ?? member.influencer_id;
+    const influencer = getInfluencer(member);
+    const influencerId = influencer?.id ?? member.influencer_id;
     const influencerName =
       influencer?.name?.trim() || "인플루언서";
     const recipientEmail =
@@ -234,14 +317,9 @@ export async function POST(request: NextRequest) {
       product: campaign.product ?? "",
     };
 
-    const subject = replaceTemplate(
-      subjectTemplate,
-      variables
-    );
-    const body = replaceTemplate(
-      bodyTemplate,
-      variables
-    );
+    const subject = replaceTemplate(subjectTemplate, variables);
+    const body = replaceTemplate(bodyTemplate, variables);
+    const html = buildEmailHtml({ body, signatureHtml });
 
     try {
       const sendResult = await sendGmail({
@@ -249,13 +327,11 @@ export async function POST(request: NextRequest) {
         to: recipientEmail,
         subject,
         body,
+        html,
       });
 
       const now = new Date().toISOString();
-
-      const {
-        error: historyError,
-      } = await admin
+      const { error: historyError } = await admin
         .from("campaign_email_sends")
         .insert({
           campaign_id: campaignId,
@@ -277,10 +353,7 @@ export async function POST(request: NextRequest) {
         });
 
       if (historyError) {
-        console.error(
-          "campaign_email_sends insert error:",
-          historyError
-        );
+        console.error("campaign_email_sends insert error:", historyError);
       }
 
       results.push({
@@ -298,12 +371,9 @@ export async function POST(request: NextRequest) {
         error instanceof Error
           ? error.message
           : "Gmail 발송 중 오류가 발생했습니다.";
-
       const now = new Date().toISOString();
 
-      const {
-        error: failedHistoryError,
-      } = await admin
+      const { error: failedHistoryError } = await admin
         .from("campaign_email_sends")
         .insert({
           campaign_id: campaignId,
@@ -342,15 +412,9 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const sent = results.filter(
-    (item) => item.status === "sent"
-  ).length;
-  const failed = results.filter(
-    (item) => item.status === "failed"
-  ).length;
-  const skipped = results.filter(
-    (item) => item.status === "skipped"
-  ).length;
+  const sent = results.filter((item) => item.status === "sent").length;
+  const failed = results.filter((item) => item.status === "failed").length;
+  const skipped = results.filter((item) => item.status === "skipped").length;
 
   return NextResponse.json({
     success: true,

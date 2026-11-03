@@ -42,7 +42,28 @@ function normalizeStatusLabel(label: unknown) {
   return String(label ?? "").replace(/\s/g, "");
 }
 
+function getStatusLabel(status: string | null) {
+  const entry = STATUS_ENTRIES.find(
+    ([value]) => value === (status || "candidate")
+  );
+
+  return normalizeStatusLabel(entry?.[1]);
+}
+
+function isExcludedStatus(status: string | null) {
+  const label = getStatusLabel(status);
+
+  return (
+    label.includes("진행사양") ||
+    label.includes("진행중단")
+  );
+}
+
 function isConfirmedStatus(status: string | null) {
+  if (isExcludedStatus(status)) {
+    return false;
+  }
+
   const contactedIndex = STATUS_ENTRIES.findIndex(([, label]) =>
     normalizeStatusLabel(label).includes("컨택완료")
   );
@@ -84,6 +105,8 @@ export default function CampaignInfluencerManager({
   const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
   const [removing, setRemoving] = useState(false);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState("");
+  const [updatingBulkStatus, setUpdatingBulkStatus] = useState(false);
 
   const [pageSize, setPageSize] = useState(50);
   const [candidatePage, setCandidatePage] = useState(1);
@@ -96,12 +119,20 @@ export default function CampaignInfluencerManager({
   );
 
   const candidateInfluencers = useMemo(
-    () => campaignInfluencers.filter((item) => !isConfirmedStatus(item.status)),
+    () =>
+      campaignInfluencers.filter(
+        (item) => !isConfirmedStatus(item.status)
+      ),
     [campaignInfluencers]
   );
 
   const confirmedInfluencers = useMemo(
-    () => campaignInfluencers.filter((item) => isConfirmedStatus(item.status)),
+    () =>
+      campaignInfluencers.filter(
+        (item) =>
+          !isExcludedStatus(item.status) &&
+          isConfirmedStatus(item.status)
+      ),
     [campaignInfluencers]
   );
 
@@ -307,6 +338,44 @@ export default function CampaignInfluencerManager({
     router.refresh();
   };
 
+  const handleBulkStatusChange = async () => {
+    if (
+      selectedCampaignIds.length === 0 ||
+      !bulkStatus ||
+      updatingBulkStatus
+    ) {
+      return;
+    }
+
+    const statusLabel =
+      STATUS_ENTRIES.find(([value]) => value === bulkStatus)?.[1] ??
+      bulkStatus;
+
+    const confirmed = window.confirm(
+      `선택한 ${selectedCampaignIds.length}명의 진행 상태를 "${statusLabel}"(으)로 변경하시겠습니까?`
+    );
+
+    if (!confirmed) return;
+
+    setUpdatingBulkStatus(true);
+
+    const { error } = await supabase
+      .from("campaign_influencers")
+      .update({ status: bulkStatus })
+      .in("id", selectedCampaignIds);
+
+    setUpdatingBulkStatus(false);
+
+    if (error) {
+      alert(`진행 상태 일괄 변경 실패: ${error.message}`);
+      return;
+    }
+
+    setSelectedCampaignIds([]);
+    setBulkStatus("");
+    router.refresh();
+  };
+
   const handleStatusChange = async (
     campaignInfluencerId: string,
     status: string
@@ -408,18 +477,52 @@ export default function CampaignInfluencerManager({
         </div>
 
         {selectedCampaignIds.length > 0 && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <span className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">
+              {selectedCampaignIds.length}명 선택
+            </span>
+
+            <div className="flex items-center gap-2 rounded-lg border border-slate-300 bg-slate-50 p-1">
+              <select
+                value={bulkStatus}
+                onChange={(e) => setBulkStatus(e.target.value)}
+                disabled={updatingBulkStatus}
+                className="min-w-[150px] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                aria-label="일괄 변경할 진행 상태"
+              >
+                <option value="">진행 상태 선택</option>
+                {STATUS_ENTRIES.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={handleBulkStatusChange}
+                disabled={!bulkStatus || updatingBulkStatus}
+                className="rounded-md bg-slate-800 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {updatingBulkStatus ? "변경 중..." : "일괄 변경"}
+              </button>
+            </div>
+
             <button
               type="button"
-              onClick={() => setSelectedCampaignIds([])}
+              onClick={() => {
+                setSelectedCampaignIds([]);
+                setBulkStatus("");
+              }}
               className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50"
             >
               선택 해제
             </button>
+
             <button
               type="button"
               onClick={() => setEmailModalOpen(true)}
-              disabled={removing}
+              disabled={removing || updatingBulkStatus}
               className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
             >
               선택 {selectedCampaignIds.length}명 메일
@@ -428,7 +531,7 @@ export default function CampaignInfluencerManager({
             <button
               type="button"
               onClick={handleBulkRemove}
-              disabled={removing}
+              disabled={removing || updatingBulkStatus}
               className="rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {removing
@@ -449,6 +552,7 @@ export default function CampaignInfluencerManager({
                   checked={areAllSelected(pageItems)}
                   onChange={() => toggleAll(pageItems)}
                   aria-label={`${title} 전체 선택`}
+                  className="h-5 w-5 cursor-pointer accent-slate-800"
                 />
               </th>
               <th className="px-5 py-3 text-left">이름</th>
@@ -477,16 +581,28 @@ export default function CampaignInfluencerManager({
                   className="cursor-pointer transition hover:bg-slate-50"
                 >
                   <td
-                    className="w-12 px-4 py-4 text-center"
-                    onClick={(e) => e.stopPropagation()}
+                    className="w-16 cursor-pointer px-4 py-4 text-center hover:bg-slate-100"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleCampaignInfluencer(item.id);
+                    }}
+                    aria-label={`${
+                      influencer.name ??
+                      influencer.instagram_id ??
+                      "이름 없는 인플루언서"
+                    } 선택 영역`}
                   >
                     <input
                       type="checkbox"
                       checked={selectedCampaignIds.includes(item.id)}
                       onChange={() => toggleCampaignInfluencer(item.id)}
+                      onClick={(e) => e.stopPropagation()}
                       aria-label={`${
-                        influencer.name || influencer.instagram_id
+                        influencer.name ??
+                        influencer.instagram_id ??
+                        "이름 없는 인플루언서"
                       } 선택`}
+                      className="h-6 w-6 cursor-pointer accent-slate-800"
                     />
                   </td>
 
@@ -536,8 +652,8 @@ export default function CampaignInfluencerManager({
                       onClick={() =>
                         handleRemove(
                           item.id,
-                          influencer.name ||
-                            influencer.instagram_id ||
+                          influencer.name ??
+                            influencer.instagram_id ??
                             "이름 없는 인플루언서"
                         )
                       }

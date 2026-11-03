@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export type CampaignEmailRecipient = {
   campaignInfluencerId: string;
@@ -9,6 +9,46 @@ export type CampaignEmailRecipient = {
   email: string | null;
 };
 
+type DraftPreset = {
+  id: string;
+  label: string;
+  subject: string;
+  body: string;
+};
+
+const DRAFT_PRESETS: DraftPreset[] = [
+  {
+    id: "collaboration",
+    label: "협업 제안",
+    subject: "[{{brand}}] {{product}} 협업 제안",
+    body: `안녕하세요 {{name}}님,
+
+{{brand}} {{product}} 관련 협업 제안드리고자 연락드립니다.
+
+협업 가능 여부와 일정 확인 후 회신 부탁드립니다.
+
+감사합니다.`,
+  },
+  {
+    id: "detail",
+    label: "협업 상세 안내",
+    subject: "[{{brand}}] {{product}} 협업 상세 안내",
+    body: `안녕하세요 {{name}}님,
+
+{{brand}} {{product}} 협업 관련 상세 내용 전달드립니다.
+
+내용 확인 후 편하게 회신 부탁드립니다.
+
+감사합니다.`,
+  },
+  {
+    id: "blank",
+    label: "빈 초안",
+    subject: "",
+    body: "",
+  },
+];
+
 type SendResult = {
   success: boolean;
   sender?: string;
@@ -16,14 +56,17 @@ type SendResult = {
   sent: number;
   failed: number;
   skipped: number;
-  results?: Array<{
-    campaignInfluencerId: string;
-    influencerId: string;
-    name: string | null;
-    email: string | null;
-    status: "sent" | "failed" | "skipped";
-    error?: string | null;
-  }>;
+};
+
+type PreviewResult = {
+  success: boolean;
+  sender: string;
+  recipientName: string | null;
+  recipientEmail: string | null;
+  subject: string;
+  body: string;
+  html: string;
+  hasSignature: boolean;
 };
 
 export default function CampaignEmailModal({
@@ -39,22 +82,14 @@ export default function CampaignEmailModal({
   onClose: () => void;
   onSent?: (result: SendResult) => void;
 }) {
-  const [subject, setSubject] = useState(
-    "[{{brand}}] {{campaign}} 협업 제안의 건"
-  );
-
-  const [body, setBody] = useState(
-`안녕하세요 {{name}}님,
-
-{{brand}} {{product}} 관련 협업 제안드리고자 연락드립니다.
-
-자세한 내용 확인 후 회신 부탁드립니다.
-
-감사합니다.`
-  );
-
+  const [presetId, setPresetId] = useState("collaboration");
+  const [subject, setSubject] = useState(DRAFT_PRESETS[0].subject);
+  const [body, setBody] = useState(DRAFT_PRESETS[0].body);
   const [sending, setSending] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const [result, setResult] = useState<SendResult | null>(null);
+  const [preview, setPreview] = useState<PreviewResult | null>(null);
+  const [activeTab, setActiveTab] = useState<"write" | "preview">("write");
 
   const mailableCount = useMemo(
     () => recipients.filter((item) => Boolean(item.email?.trim())).length,
@@ -63,14 +98,108 @@ export default function CampaignEmailModal({
 
   const missingEmailCount = recipients.length - mailableCount;
 
-  if (!open) {
-    return null;
-  }
+  useEffect(() => {
+    if (!open) return;
+    setResult(null);
+    setPreview(null);
+    setActiveTab("write");
+  }, [open]);
+
+  if (!open) return null;
+
+  const applyPreset = (nextPresetId: string) => {
+    const preset = DRAFT_PRESETS.find((item) => item.id === nextPresetId);
+    if (!preset) return;
+
+    const hasCurrentDraft = subject.trim() || body.trim();
+
+    if (
+      hasCurrentDraft &&
+      !window.confirm(
+        "초안을 변경하면 현재 작성한 제목과 본문이 바뀝니다. 계속할까요?"
+      )
+    ) {
+      return;
+    }
+
+    setPresetId(nextPresetId);
+    setSubject(preset.subject);
+    setBody(preset.body);
+    setPreview(null);
+    setActiveTab("write");
+  };
 
   const handleClose = () => {
-    if (sending) return;
+    if (sending || previewing) return;
     setResult(null);
+    setPreview(null);
     onClose();
+  };
+
+  const requestApi = async (mode: "preview" | "send") => {
+    const response = await fetch("/api/gmail/send-bulk", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        mode,
+        campaignId,
+        campaignInfluencerIds: recipients.map(
+          (item) => item.campaignInfluencerId
+        ),
+        subject,
+        body,
+      }),
+    });
+
+    const responseText = await response.text();
+
+    let data: any;
+
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      throw new Error(
+        `메일 API가 JSON이 아닌 응답을 반환했습니다. HTTP ${response.status}`
+      );
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        data.error || "메일 처리 중 오류가 발생했습니다."
+      );
+    }
+
+    return data;
+  };
+
+  const requestPreview = async () => {
+    if (!subject.trim()) {
+      alert("메일 제목을 입력해주세요.");
+      return;
+    }
+
+    if (!body.trim()) {
+      alert("메일 본문을 입력해주세요.");
+      return;
+    }
+
+    setPreviewing(true);
+
+    try {
+      const data = (await requestApi("preview")) as PreviewResult;
+      setPreview(data);
+      setActiveTab("preview");
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? error.message
+          : "메일 미리보기를 불러오지 못했습니다."
+      );
+    } finally {
+      setPreviewing(false);
+    }
   };
 
   const handleSend = async () => {
@@ -96,31 +225,7 @@ export default function CampaignEmailModal({
     setResult(null);
 
     try {
-      const response = await fetch("/api/gmail/send-bulk", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          campaignId,
-          campaignInfluencerIds: recipients.map(
-            (item) => item.campaignInfluencerId
-          ),
-          subject,
-          body,
-        }),
-      });
-
-      const data = (await response.json()) as SendResult & {
-        error?: string;
-      };
-
-      if (!response.ok) {
-        throw new Error(
-          data.error || "메일 발송 중 오류가 발생했습니다."
-        );
-      }
-
+      const data = (await requestApi("send")) as SendResult;
       setResult(data);
       onSent?.(data);
     } catch (error) {
@@ -143,131 +248,218 @@ export default function CampaignEmailModal({
         }
       }}
     >
-      <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+      <div className="max-h-[94vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
         <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
           <div>
             <h2 className="text-xl font-bold text-slate-900">
               선택 인플루언서에게 메일 보내기
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              현재 로그인 사용자에게 연결된 Gmail 계정으로 발송합니다.
+              초안을 선택한 뒤 제목과 본문을 자유롭게 수정할 수 있습니다.
             </p>
           </div>
 
           <button
             type="button"
             onClick={handleClose}
-            disabled={sending}
+            disabled={sending || previewing}
             className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-40"
           >
             닫기
           </button>
         </div>
 
+        <div className="border-b border-slate-200 px-6 pt-4">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab("write")}
+              className={`border-b-2 px-4 py-3 text-sm font-semibold ${
+                activeTab === "write"
+                  ? "border-blue-600 text-blue-700"
+                  : "border-transparent text-slate-500"
+              }`}
+            >
+              작성
+            </button>
+
+            <button
+              type="button"
+              onClick={requestPreview}
+              disabled={previewing}
+              className={`border-b-2 px-4 py-3 text-sm font-semibold ${
+                activeTab === "preview"
+                  ? "border-blue-600 text-blue-700"
+                  : "border-transparent text-slate-500"
+              } disabled:opacity-40`}
+            >
+              {previewing ? "미리보기 생성 중..." : "미리보기"}
+            </button>
+          </div>
+        </div>
+
         <div className="space-y-5 p-6">
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-medium text-slate-500">
-                선택
-              </p>
-              <p className="mt-1 text-2xl font-bold text-slate-900">
-                {recipients.length}명
-              </p>
+              <p className="text-xs font-medium text-slate-500">선택</p>
+              <p className="mt-1 text-2xl font-bold">{recipients.length}명</p>
             </div>
 
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-              <p className="text-xs font-medium text-emerald-700">
-                발송 가능
-              </p>
+              <p className="text-xs font-medium text-emerald-700">발송 가능</p>
               <p className="mt-1 text-2xl font-bold text-emerald-800">
                 {mailableCount}명
               </p>
             </div>
 
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-              <p className="text-xs font-medium text-amber-700">
-                이메일 없음
-              </p>
+              <p className="text-xs font-medium text-amber-700">이메일 없음</p>
               <p className="mt-1 text-2xl font-bold text-amber-800">
                 {missingEmailCount}명
               </p>
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-200">
-            <div className="border-b border-slate-200 px-4 py-3">
-              <p className="text-sm font-semibold text-slate-700">
-                수신자
-              </p>
-            </div>
+          {activeTab === "write" ? (
+            <>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  초안 선택
+                </label>
 
-            <div className="max-h-44 divide-y divide-slate-100 overflow-y-auto">
-              {recipients.map((recipient) => (
-                <div
-                  key={recipient.campaignInfluencerId}
-                  className="flex items-center justify-between gap-4 px-4 py-3 text-sm"
+                <select
+                  value={presetId}
+                  onChange={(event) => applyPreset(event.target.value)}
+                  disabled={sending}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm"
                 >
-                  <span className="font-medium text-slate-800">
-                    {recipient.name || "이름 없음"}
-                  </span>
+                  {DRAFT_PRESETS.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-                  <span
-                    className={
-                      recipient.email
-                        ? "text-slate-600"
-                        : "font-medium text-amber-700"
-                    }
-                  >
-                    {recipient.email || "이메일 없음"}
-                  </span>
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  제목
+                </label>
+
+                <input
+                  type="text"
+                  value={subject}
+                  onChange={(event) => {
+                    setSubject(event.target.value);
+                    setPreview(null);
+                  }}
+                  placeholder="예: [삼성전자] 갤럭시워치 협업 제안"
+                  disabled={sending}
+                  className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-500 disabled:bg-slate-100"
+                />
+
+                <p className="mt-2 text-xs text-slate-500">
+                  캠페인명은 제목에 자동으로 강제하지 않습니다. 최종 제목을 직접 확인하고 수정한 뒤 발송하세요.
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  본문
+                </label>
+
+                <textarea
+                  value={body}
+                  onChange={(event) => {
+                    setBody(event.target.value);
+                    setPreview(null);
+                  }}
+                  disabled={sending}
+                  rows={13}
+                  className="w-full resize-y rounded-lg border border-slate-300 px-4 py-3 text-sm leading-6 outline-none focus:border-slate-500 disabled:bg-slate-100"
+                />
+              </div>
+
+              <div className="rounded-xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">
+                사용할 수 있는 변수:
+                <strong className="ml-1 text-slate-700">
+                  {"{{name}}"}, {"{{campaign}}"}, {"{{brand}}"}, {"{{product}}"}
+                </strong>
+                <br />
+                미리보기와 실제 발송 시 각 수신자 정보로 자동 치환됩니다.
+              </div>
+
+              <button
+                type="button"
+                onClick={requestPreview}
+                disabled={previewing}
+                className="w-full rounded-lg border border-blue-300 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-40"
+              >
+                {previewing ? "미리보기 생성 중..." : "실제 메일 형태 미리보기"}
+              </button>
+            </>
+          ) : (
+            <div className="space-y-4">
+              {!preview ? (
+                <div className="rounded-xl border border-dashed border-slate-300 px-6 py-12 text-center text-sm text-slate-500">
+                  미리보기를 생성해주세요.
                 </div>
-              ))}
+              ) : (
+                <>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <p>
+                        <span className="font-semibold">보내는 사람:</span>{" "}
+                        {preview.sender}
+                      </p>
+                      <p>
+                        <span className="font-semibold">미리보기 수신자:</span>{" "}
+                        {preview.recipientName || "-"}{" "}
+                        {preview.recipientEmail
+                          ? `(${preview.recipientEmail})`
+                          : ""}
+                      </p>
+                    </div>
+
+                    <p className="mt-3">
+                      <span className="font-semibold">제목:</span>{" "}
+                      {preview.subject}
+                    </p>
+
+                    <p className="mt-2 text-xs text-slate-500">
+                      Gmail 개인 서명: {preview.hasSignature ? "포함됨" : "설정된 서명 없음"}
+                    </p>
+                  </div>
+
+                  <div className="overflow-hidden rounded-xl border border-slate-300 bg-white">
+                    <div className="border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+                      실제 메일 본문 미리보기
+                    </div>
+                    <iframe
+                      title="메일 미리보기"
+                      srcDoc={preview.html}
+                      sandbox=""
+                      className="h-[420px] w-full bg-white"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("write")}
+                    className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    다시 수정
+                  </button>
+                </>
+              )}
             </div>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">
-              제목
-            </label>
-            <input
-              type="text"
-              value={subject}
-              onChange={(event) => setSubject(event.target.value)}
-              disabled={sending}
-              className="w-full rounded-lg border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-500 disabled:bg-slate-100"
-            />
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">
-              본문
-            </label>
-            <textarea
-              value={body}
-              onChange={(event) => setBody(event.target.value)}
-              disabled={sending}
-              rows={12}
-              className="w-full resize-y rounded-lg border border-slate-300 px-4 py-3 text-sm leading-6 outline-none focus:border-slate-500 disabled:bg-slate-100"
-            />
-          </div>
-
-          <div className="rounded-xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">
-            사용할 수 있는 변수:
-            <strong className="ml-1 text-slate-700">
-              {"{{name}}"}, {"{{campaign}}"}, {"{{brand}}"}, {"{{product}}"}
-            </strong>
-            <br />
-            각 수신자에게 발송할 때 실제 이름과 캠페인 정보로 자동 치환됩니다.
-          </div>
+          )}
 
           {result && (
             <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-              <p className="font-semibold text-blue-900">
-                발송 처리 완료
-              </p>
+              <p className="font-semibold text-blue-900">발송 처리 완료</p>
               <p className="mt-2 text-sm text-blue-800">
-                발송 {result.sent}명 · 실패 {result.failed}명 ·
-                이메일 없음 {result.skipped}명
+                발송 {result.sent}명 · 실패 {result.failed}명 · 이메일 없음 {result.skipped}명
               </p>
               {result.sender && (
                 <p className="mt-1 text-xs text-blue-700">
@@ -282,7 +474,7 @@ export default function CampaignEmailModal({
           <button
             type="button"
             onClick={handleClose}
-            disabled={sending}
+            disabled={sending || previewing}
             className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
           >
             {result ? "확인" : "취소"}
@@ -292,12 +484,10 @@ export default function CampaignEmailModal({
             <button
               type="button"
               onClick={handleSend}
-              disabled={sending || mailableCount === 0}
+              disabled={sending || previewing || mailableCount === 0}
               className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {sending
-                ? "메일 발송 중..."
-                : `${mailableCount}명에게 발송`}
+              {sending ? "메일 발송 중..." : `${mailableCount}명에게 발송`}
             </button>
           )}
         </div>

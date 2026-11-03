@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 
@@ -16,9 +16,6 @@ import type {
   InfluencerPlatform,
 } from "@/types/influencer";
 
-import { buildGmailComposeUrl } from "@/lib/gmail-compose";
-import { exportSelectedInfluencersToXlsx } from "@/lib/export-influencers-xlsx";
-
 type Influencer = {
   id: string;
 
@@ -27,6 +24,7 @@ type Influencer = {
 
   category: string | null;
   categories?: string[] | null;
+  subcategory: string | null;
 
   gender: string | null;
   age_group: string | null;
@@ -152,12 +150,8 @@ function getCollaborationRate(influencer: Influencer) {
 
 export default function InfluencerTable({
   influencers,
-  currentUserName,
-  totalRegisteredInfluencers,
 }: {
   influencers: Influencer[];
-  currentUserName: string | null;
-  totalRegisteredInfluencers: number;
 }) {
   const supabase = createClient();
   const router = useRouter();
@@ -198,56 +192,11 @@ export default function InfluencerTable({
   const [deleting, setDeleting] =
     useState(false);
 
-  const [exporting, setExporting] =
-    useState(false);
-
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
-
-  /*
-   * 과거 Import에서 동일 채널이 서로 다른 influencers 행에 연결된 경우가 있어
-   * 마케터 목록에서는 동일한 플랫폼 + 아이디를 한 번만 보여줍니다.
-   *
-   * 채널이 없는 legacy 행은 instagram_id를 기준으로 묶고,
-   * 식별 가능한 채널 정보가 전혀 없는 행만 개별 ID를 유지합니다.
-   */
-  const uniqueInfluencers = useMemo(() => {
-    const seen = new Set<string>();
-    const result: Influencer[] = [];
-
-    for (const influencer of influencers) {
-      const primary = getPrimaryChannel(influencer);
-
-      const platform =
-        primary?.platform ??
-        (influencer.instagram_id ? "instagram" : null);
-
-      const handle =
-        primary?.handle ??
-        influencer.instagram_id ??
-        null;
-
-      const key =
-        platform && handle
-          ? `${platform}::${handle.trim().toLowerCase()}`
-          : `influencer::${influencer.id}`;
-
-      if (seen.has(key)) {
-        continue;
-      }
-
-      seen.add(key);
-      result.push(influencer);
-    }
-
-    return result;
-  }, [influencers]);
-
   /*
    * 카테고리 목록
    */
   const categories = useMemo(() => {
-    const values = uniqueInfluencers.flatMap(
+    const values = influencers.flatMap(
       (item) =>
         item.categories?.length
           ? item.categories
@@ -259,7 +208,7 @@ export default function InfluencerTable({
     return [
       ...new Set(values),
     ].sort();
-  }, [uniqueInfluencers]);
+  }, [influencers]);
 
   /*
    * 검색 + 필터 + 정렬
@@ -286,7 +235,7 @@ export default function InfluencerTable({
           : null;
 
       const result =
-        uniqueInfluencers.filter(
+        influencers.filter(
           (influencer) => {
             /*
              * 채널 정보 검색
@@ -457,7 +406,7 @@ export default function InfluencerTable({
 
       return result;
     }, [
-      uniqueInfluencers,
+      influencers,
       search,
       category,
       platformFilter,
@@ -465,41 +414,6 @@ export default function InfluencerTable({
       maxFollowers,
       sort,
     ]);
-
-  /*
-   * 페이지네이션
-   * 검색/필터/정렬 결과를 기준으로 50개씩 보여줍니다.
-   */
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredInfluencers.length / pageSize)
-  );
-
-  useEffect(() => {
-    setPage(1);
-  }, [
-    search,
-    category,
-    platformFilter,
-    minFollowers,
-    maxFollowers,
-    sort,
-    pageSize,
-  ]);
-
-  useEffect(() => {
-    if (page > totalPages) {
-      setPage(totalPages);
-    }
-  }, [page, totalPages]);
-
-  const paginatedInfluencers = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filteredInfluencers.slice(
-      start,
-      start + pageSize
-    );
-  }, [filteredInfluencers, page, pageSize]);
 
   /*
    * 필터 초기화
@@ -521,10 +435,13 @@ export default function InfluencerTable({
    * 체크박스
    */
   const allVisibleSelected =
-    paginatedInfluencers.length > 0 &&
-    paginatedInfluencers.every(
+    filteredInfluencers.length >
+      0 &&
+    filteredInfluencers.every(
       (item) =>
-        selectedIds.includes(item.id)
+        selectedIds.includes(
+          item.id
+        )
     );
 
   const toggleSelect = (
@@ -547,7 +464,7 @@ export default function InfluencerTable({
   const toggleSelectAll =
     () => {
       const visibleIds =
-        paginatedInfluencers.map(
+        filteredInfluencers.map(
           (item) =>
             item.id
         );
@@ -625,34 +542,6 @@ export default function InfluencerTable({
     };
 
   /*
-   * 선택 Excel 다운로드
-   */
-  const handleExportSelected =
-    async () => {
-      if (selectedIds.length === 0) {
-        return;
-      }
-
-      setExporting(true);
-
-      try {
-        await exportSelectedInfluencersToXlsx({
-          supabase,
-          selectedIds,
-        });
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Excel 다운로드 중 오류가 발생했습니다.";
-
-        alert(message);
-      } finally {
-        setExporting(false);
-      }
-    };
-
-  /*
    * 일괄 삭제
    */
   const handleBulkDelete =
@@ -711,7 +600,7 @@ export default function InfluencerTable({
           </p>
 
           <p className="mt-1 text-2xl font-bold text-slate-900">
-            {totalRegisteredInfluencers.toLocaleString()}
+            {influencers.length.toLocaleString()}
           </p>
         </div>
 
@@ -731,7 +620,9 @@ export default function InfluencerTable({
           </p>
 
           <p className="mt-1 text-2xl font-bold text-slate-900">
-            {categories.length}
+            {
+              categories.length
+            }
           </p>
         </div>
       </div>
@@ -875,20 +766,7 @@ export default function InfluencerTable({
           />
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-          <select
-            value={pageSize}
-            onChange={(e) =>
-              setPageSize(Number(e.target.value))
-            }
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-            aria-label="페이지당 표시 개수"
-          >
-            <option value={25}>25명씩 보기</option>
-            <option value={50}>50명씩 보기</option>
-            <option value={100}>100명씩 보기</option>
-          </select>
-
+        <div className="mt-3 flex justify-end">
           <select
             value={sort}
             onChange={(e) =>
@@ -935,8 +813,9 @@ export default function InfluencerTable({
             </p>
 
             <p className="mt-1 text-sm text-red-600">
-              선택한 인플루언서를 Excel로 다운로드하거나
-              한 번에 삭제할 수 있습니다.
+              선택한 인플루언서를
+              한 번에 삭제할
+              수 있습니다.
             </p>
           </div>
 
@@ -956,25 +835,10 @@ export default function InfluencerTable({
             <button
               type="button"
               onClick={
-                handleExportSelected
-              }
-              disabled={
-                exporting || deleting
-              }
-              className="rounded-lg border border-emerald-600 bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-            >
-              {exporting
-                ? "Excel 생성 중..."
-                : "Excel 다운로드"}
-            </button>
-
-            <button
-              type="button"
-              onClick={
                 handleBulkDelete
               }
               disabled={
-                deleting || exporting
+                deleting
               }
               className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
             >
@@ -1001,7 +865,7 @@ export default function InfluencerTable({
                     onChange={
                       toggleSelectAll
                     }
-                    className="h-4 w-4 cursor-pointer"
+                    className="h-5 w-5 cursor-pointer accent-slate-800"
                   />
                 </th>
 
@@ -1040,7 +904,7 @@ export default function InfluencerTable({
             </thead>
 
             <tbody className="divide-y divide-slate-300">
-              {paginatedInfluencers.map(
+              {filteredInfluencers.map(
                 (
                   influencer
                 ) => {
@@ -1078,15 +942,20 @@ export default function InfluencerTable({
                       className="cursor-pointer transition hover:bg-slate-100"
                     >
                       {/* 체크 */}
-                      <td className="w-12 px-4 py-4 text-center">
+                      <td
+                        className="w-16 cursor-pointer px-4 py-4 text-center hover:bg-slate-200"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleSelect(influencer.id);
+                        }}
+                        aria-label={`${influencer.name || "인플루언서"} 선택 영역`}
+                      >
                         <input
                           type="checkbox"
                           checked={selectedIds.includes(
                             influencer.id
                           )}
-                          onClick={(
-                            e
-                          ) =>
+                          onClick={(e) =>
                             e.stopPropagation()
                           }
                           onChange={() =>
@@ -1094,7 +963,8 @@ export default function InfluencerTable({
                               influencer.id
                             )
                           }
-                          className="h-4 w-4 cursor-pointer"
+                          className="h-6 w-6 cursor-pointer accent-slate-800"
+                          aria-label={`${influencer.name || "인플루언서"} 선택`}
                         />
                       </td>
 
@@ -1106,22 +976,12 @@ export default function InfluencerTable({
                               "-"}
                           </p>
 
-                          {influencer.email ? (
-                            <a
-                              href={buildGmailComposeUrl({
-                                email: influencer.email,
-                                influencerName: influencer.name,
-                                userName: currentUserName,
-                              })}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="text-sm font-medium text-blue-600 hover:underline"
-                            >
-                              {influencer.email}
-                            </a>
-                          ) : (
-                            <span className="text-slate-400">-</span>
+                          {influencer.email && (
+                            <p className="mt-1 text-xs text-slate-400">
+                              {
+                                influencer.email
+                              }
+                            </p>
                           )}
                         </div>
                       </td>
@@ -1311,59 +1171,6 @@ export default function InfluencerTable({
             </tbody>
           </table>
         </div>
-
-        {filteredInfluencers.length > 0 && (
-          <div className="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-slate-500">
-              {(
-                (page - 1) * pageSize + 1
-              ).toLocaleString()}
-              -
-              {Math.min(
-                page * pageSize,
-                filteredInfluencers.length
-              ).toLocaleString()}
-              명 / 총{" "}
-              {filteredInfluencers.length.toLocaleString()}명
-            </p>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  setPage((prev) =>
-                    Math.max(1, prev - 1)
-                  )
-                }
-                disabled={page === 1}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                이전
-              </button>
-
-              <span className="min-w-[90px] text-center text-sm text-slate-600">
-                {page.toLocaleString()} /{" "}
-                {totalPages.toLocaleString()}
-              </span>
-
-              <button
-                type="button"
-                onClick={() =>
-                  setPage((prev) =>
-                    Math.min(
-                      totalPages,
-                      prev + 1
-                    )
-                  )
-                }
-                disabled={page === totalPages}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                다음
-              </button>
-            </div>
-          </div>
-        )}
       </section>
     </div>
   );
