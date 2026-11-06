@@ -124,11 +124,14 @@ export async function POST(request: NextRequest) {
   ) {
     return NextResponse.json(
       {
+        code: connectionError
+          ? "GMAIL_CONNECTION_LOOKUP_FAILED"
+          : "GMAIL_NOT_CONNECTED",
         error: connectionError
           ? `Gmail 연결 조회 실패: ${connectionError.message}`
-          : "연결된 Gmail 계정이 없습니다.",
+          : "Gmail 계정이 연결되어 있지 않습니다.",
       },
-      { status: 400 }
+      { status: connectionError ? 500 : 409 }
     );
   }
 

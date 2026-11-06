@@ -20,7 +20,7 @@ const DRAFT_PRESETS: DraftPreset[] = [
   {
     id: "collaboration",
     label: "협업 제안",
-    subject: "[빅밴드] {{브랜드}} {{제품}} 협업 제안",
+    subject: "[{{브랜드}}] {{제품}} 협업 제안",
     body: `안녕하세요 {{인플루언서명}}님,
 
 {{브랜드}} {{제품}} 관련 협업 제안드리고자 연락드립니다.
@@ -32,7 +32,7 @@ const DRAFT_PRESETS: DraftPreset[] = [
   {
     id: "detail",
     label: "협업 상세 안내",
-    subject: "[빅밴드] {{브랜드}} {{제품}} 협업 상세 안내",
+    subject: "[{{브랜드}}] {{제품}} 협업 상세 안내",
     body: `안녕하세요 {{인플루언서명}}님,
 
 {{브랜드}} {{제품}} 협업 관련 상세 내용 전달드립니다.
@@ -90,6 +90,8 @@ export default function CampaignEmailModal({
   const [result, setResult] = useState<SendResult | null>(null);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [activeTab, setActiveTab] = useState<"write" | "preview">("write");
+  const [gmailConnectionRequired, setGmailConnectionRequired] =
+    useState(false);
 
   const mailableCount = useMemo(
     () => recipients.filter((item) => Boolean(item.email?.trim())).length,
@@ -102,6 +104,7 @@ export default function CampaignEmailModal({
     if (!open) return;
     setResult(null);
     setPreview(null);
+    setGmailConnectionRequired(false);
     setActiveTab("write");
   }, [open]);
 
@@ -166,11 +169,25 @@ export default function CampaignEmailModal({
     }
 
     if (!response.ok) {
+      if (
+        data.code === "GMAIL_NOT_CONNECTED" ||
+        String(data.error ?? "").includes("Gmail 계정이 연결되어 있지 않습니다") ||
+        String(data.error ?? "").includes("연결된 Gmail 계정이 없습니다")
+      ) {
+        setGmailConnectionRequired(true);
+
+        const gmailError = new Error("Gmail 계정 연결이 필요합니다.");
+        (gmailError as Error & { code?: string }).code =
+          "GMAIL_NOT_CONNECTED";
+        throw gmailError;
+      }
+
       throw new Error(
         data.error || "메일 처리 중 오류가 발생했습니다."
       );
     }
 
+    setGmailConnectionRequired(false);
     return data;
   };
 
@@ -229,11 +246,14 @@ export default function CampaignEmailModal({
       setResult(data);
       onSent?.(data);
     } catch (error) {
-      alert(
-        error instanceof Error
-          ? error.message
-          : "메일 발송 중 오류가 발생했습니다."
-      );
+      const code = (error as Error & { code?: string })?.code;
+      if (code !== "GMAIL_NOT_CONNECTED") {
+        alert(
+          error instanceof Error
+            ? error.message
+            : "메일 발송 중 오류가 발생했습니다."
+        );
+      }
     } finally {
       setSending(false);
     }
@@ -299,6 +319,31 @@ export default function CampaignEmailModal({
         </div>
 
         <div className="space-y-5 p-6">
+          {gmailConnectionRequired && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-semibold text-amber-900">
+                    Gmail 연결이 필요합니다.
+                  </p>
+                  <p className="mt-1 text-sm leading-5 text-amber-800">
+                    메일 미리보기와 발송을 사용하려면 먼저 본인의 Gmail 계정을 연결해주세요.
+                    연결이 완료되면 이 캠페인으로 돌아와 다시 메일을 보낼 수 있습니다.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.location.href = "/api/google/oauth/start";
+                  }}
+                  className="shrink-0 rounded-lg bg-amber-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-800"
+                >
+                  Gmail 연결하기
+                </button>
+              </div>
+            </div>
+          )}
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-medium text-slate-500">선택</p>
@@ -359,7 +404,7 @@ export default function CampaignEmailModal({
                 />
 
                 <p className="mt-2 text-xs text-slate-500">
-                  최종 제목을 직접 확인하고 수정한 뒤 발송하세요!
+                  캠페인명은 제목에 자동으로 강제하지 않습니다. 최종 제목을 직접 확인하고 수정한 뒤 발송하세요.
                 </p>
               </div>
 
