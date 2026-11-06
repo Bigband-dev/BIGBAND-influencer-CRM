@@ -174,7 +174,11 @@ export default function CampaignEmailModal({
         alert(
           "Gmail 계정 연결이 필요합니다.\n확인을 누르면 Gmail 연결 화면으로 이동합니다."
         );
-        window.location.href = "/api/google/oauth/start";
+        const returnTo =
+          window.location.pathname + window.location.search;
+
+        window.location.href =
+          `/api/google/oauth/start?returnTo=${encodeURIComponent(returnTo)}`;
 
         const gmailError = new Error("GMAIL_REDIRECTING");
         (gmailError as Error & { code?: string }).code =
