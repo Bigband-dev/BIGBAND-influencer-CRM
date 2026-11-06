@@ -5,11 +5,16 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createGoogleOAuthClient } from "@/lib/google/oauth";
 
+// OAuth callback도 로그인 세션 쿠키를 읽고 Google API를 사용하므로
+// 반드시 요청 시점에 Node.js 런타임에서 실행합니다.
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 function sanitizeReturnTo(value: string | null) {
-  if (!value) return "/account?gmail_connected=1";
+  if (!value) return "/account";
 
   if (!value.startsWith("/") || value.startsWith("//")) {
-    return "/account?gmail_connected=1";
+    return "/account";
   }
 
   return value;
@@ -22,12 +27,9 @@ export async function GET(request: NextRequest) {
     const state = request.nextUrl.searchParams.get("state");
 
     if (oauthError) {
-      return NextResponse.redirect(
-        new URL(
-          `/account?gmail_error=${encodeURIComponent(oauthError)}`,
-          request.url
-        )
-      );
+      const errorUrl = new URL("/account", request.url);
+      errorUrl.searchParams.set("gmail_error", oauthError);
+      return NextResponse.redirect(errorUrl);
     }
 
     if (!code) {
@@ -38,6 +40,7 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = await createClient();
+
     const {
       data: { user },
       error: userError,
@@ -65,20 +68,21 @@ export async function GET(request: NextRequest) {
     const googleEmail = googleUser.email?.trim();
 
     if (!googleEmail) {
-      return NextResponse.json(
-        { error: "Google 계정 이메일을 확인할 수 없습니다." },
-        { status: 400 }
+      throw new Error(
+        "Google 계정 이메일을 확인할 수 없습니다."
       );
     }
 
     const admin = createAdminClient();
 
-    const { data: existing, error: existingError } =
-      await admin
-        .from("gmail_connections")
-        .select("refresh_token")
-        .eq("user_id", user.id)
-        .maybeSingle();
+    const {
+      data: existing,
+      error: existingError,
+    } = await admin
+      .from("gmail_connections")
+      .select("refresh_token")
+      .eq("user_id", user.id)
+      .maybeSingle();
 
     if (existingError) {
       throw new Error(
@@ -86,8 +90,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Google은 재승인 상황에 따라 refresh_token을 생략할 수 있으므로
-    // 기존 토큰이 있으면 보존합니다.
     const refreshToken =
       tokens.refresh_token ??
       existing?.refresh_token ??
@@ -109,23 +111,22 @@ export async function GET(request: NextRequest) {
         ? tokens.scope.split(" ").filter(Boolean)
         : [];
 
-    const { error: upsertError } =
-      await admin
-        .from("gmail_connections")
-        .upsert(
-          {
-            user_id: user.id,
-            google_email: googleEmail,
-            refresh_token: refreshToken,
-            access_token: tokens.access_token ?? null,
-            token_expires_at: expiresAt,
-            scopes,
-            updated_at: new Date().toISOString(),
-          },
-          {
-            onConflict: "user_id",
-          }
-        );
+    const { error: upsertError } = await admin
+      .from("gmail_connections")
+      .upsert(
+        {
+          user_id: user.id,
+          google_email: googleEmail,
+          refresh_token: refreshToken,
+          access_token: tokens.access_token ?? null,
+          token_expires_at: expiresAt,
+          scopes,
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "user_id",
+        }
+      );
 
     if (upsertError) {
       throw new Error(
@@ -134,12 +135,8 @@ export async function GET(request: NextRequest) {
     }
 
     const returnTo = sanitizeReturnTo(state);
-
     const destination = new URL(returnTo, request.url);
-    destination.searchParams.set(
-      "gmail_connected",
-      "1"
-    );
+    destination.searchParams.set("gmail_connected", "1");
 
     return NextResponse.redirect(destination);
   } catch (error) {
@@ -150,9 +147,9 @@ export async function GET(request: NextRequest) {
         ? error.message
         : "Google OAuth 처리 중 오류가 발생했습니다.";
 
-    const url = new URL("/account", request.url);
-    url.searchParams.set("gmail_error", message);
+    const errorUrl = new URL("/account", request.url);
+    errorUrl.searchParams.set("gmail_error", message);
 
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(errorUrl);
   }
 }

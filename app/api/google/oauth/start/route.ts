@@ -3,10 +3,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getGoogleAuthUrl } from "@/lib/google/oauth";
 
+// 이 라우트는 Supabase 세션 쿠키를 읽으므로 빌드 시 정적 평가하면 안 됩니다.
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 function sanitizeReturnTo(value: string | null) {
   if (!value) return "/account";
 
-  // 외부 URL로의 오픈 리다이렉트 방지
   if (!value.startsWith("/") || value.startsWith("//")) {
     return "/account";
   }
@@ -24,9 +27,14 @@ export async function GET(request: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (error || !user) {
-      return NextResponse.redirect(
-        new URL("/login", request.url)
-      );
+      const loginUrl = new URL("/login", request.url);
+
+      const returnTo = request.nextUrl.searchParams.get("returnTo");
+      if (returnTo) {
+        loginUrl.searchParams.set("next", returnTo);
+      }
+
+      return NextResponse.redirect(loginUrl);
     }
 
     const returnTo = sanitizeReturnTo(
