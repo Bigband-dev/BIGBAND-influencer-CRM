@@ -41,7 +41,8 @@ function getInfluencer(member: CampaignMemberRow) {
 }
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
+  try {
+    const supabase = await createClient();
   const {
     data: { user },
     error: userError,
@@ -440,4 +441,20 @@ export async function POST(request: NextRequest) {
     skipped,
     results,
   });
+  } catch (error) {
+    console.error("send-bulk fatal error:", error);
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : "알 수 없는 서버 오류가 발생했습니다.";
+
+    return NextResponse.json(
+      {
+        code: "MAIL_API_FATAL_ERROR",
+        error: `메일 API 서버 오류: ${message}`,
+      },
+      { status: 500 }
+    );
+  }
 }
