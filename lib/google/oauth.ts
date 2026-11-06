@@ -16,6 +16,7 @@ export function getGoogleAuthUrl() {
     access_type: "offline",
 
     prompt: "consent",
+    include_granted_scopes: true,
 
     scope: [
       "https://www.googleapis.com/auth/gmail.send",

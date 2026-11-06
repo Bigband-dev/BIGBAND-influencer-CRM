@@ -90,8 +90,6 @@ export default function CampaignEmailModal({
   const [result, setResult] = useState<SendResult | null>(null);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [activeTab, setActiveTab] = useState<"write" | "preview">("write");
-  const [gmailConnectionRequired, setGmailConnectionRequired] =
-    useState(false);
 
   const mailableCount = useMemo(
     () => recipients.filter((item) => Boolean(item.email?.trim())).length,
@@ -104,7 +102,6 @@ export default function CampaignEmailModal({
     if (!open) return;
     setResult(null);
     setPreview(null);
-    setGmailConnectionRequired(false);
     setActiveTab("write");
   }, [open]);
 
@@ -174,11 +171,14 @@ export default function CampaignEmailModal({
         String(data.error ?? "").includes("Gmail 계정이 연결되어 있지 않습니다") ||
         String(data.error ?? "").includes("연결된 Gmail 계정이 없습니다")
       ) {
-        setGmailConnectionRequired(true);
+        alert(
+          "Gmail 계정 연결이 필요합니다.\n확인을 누르면 Gmail 연결 화면으로 이동합니다."
+        );
+        window.location.href = "/api/google/oauth/start";
 
-        const gmailError = new Error("Gmail 계정 연결이 필요합니다.");
+        const gmailError = new Error("GMAIL_REDIRECTING");
         (gmailError as Error & { code?: string }).code =
-          "GMAIL_NOT_CONNECTED";
+          "GMAIL_REDIRECTING";
         throw gmailError;
       }
 
@@ -187,7 +187,6 @@ export default function CampaignEmailModal({
       );
     }
 
-    setGmailConnectionRequired(false);
     return data;
   };
 
@@ -209,11 +208,15 @@ export default function CampaignEmailModal({
       setPreview(data);
       setActiveTab("preview");
     } catch (error) {
-      alert(
-        error instanceof Error
-          ? error.message
-          : "메일 미리보기를 불러오지 못했습니다."
-      );
+      const code = (error as Error & { code?: string })?.code;
+
+      if (code !== "GMAIL_REDIRECTING") {
+        alert(
+          error instanceof Error
+            ? error.message
+            : "메일 미리보기를 불러오지 못했습니다."
+        );
+      }
     } finally {
       setPreviewing(false);
     }
@@ -247,7 +250,8 @@ export default function CampaignEmailModal({
       onSent?.(data);
     } catch (error) {
       const code = (error as Error & { code?: string })?.code;
-      if (code !== "GMAIL_NOT_CONNECTED") {
+
+      if (code !== "GMAIL_REDIRECTING") {
         alert(
           error instanceof Error
             ? error.message
@@ -319,31 +323,6 @@ export default function CampaignEmailModal({
         </div>
 
         <div className="space-y-5 p-6">
-          {gmailConnectionRequired && (
-            <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="font-semibold text-amber-900">
-                    Gmail 연결이 필요합니다.
-                  </p>
-                  <p className="mt-1 text-sm leading-5 text-amber-800">
-                    메일 미리보기와 발송을 사용하려면 먼저 본인의 Gmail 계정을 연결해주세요.
-                    연결이 완료되면 이 캠페인으로 돌아와 다시 메일을 보낼 수 있습니다.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    window.location.href = "/api/google/oauth/start";
-                  }}
-                  className="shrink-0 rounded-lg bg-amber-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-800"
-                >
-                  Gmail 연결하기
-                </button>
-              </div>
-            </div>
-          )}
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-medium text-slate-500">선택</p>
