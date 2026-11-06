@@ -1,14 +1,9 @@
 import { google } from "googleapis";
 import { NextRequest, NextResponse } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createRouteSupabaseClient } from "@/lib/supabase/route-client";
 import { createGoogleOAuthClient } from "@/lib/google/oauth";
-
-// OAuth callback도 로그인 세션 쿠키를 읽고 Google API를 사용하므로
-// 반드시 요청 시점에 Node.js 런타임에서 실행합니다.
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
 
 function sanitizeReturnTo(value: string | null) {
   if (!value) return "/account";
@@ -39,7 +34,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const supabase = await createClient();
+    // next/headers의 cookies() 대신 request.cookies 사용
+    const supabase = createRouteSupabaseClient(request);
 
     const {
       data: { user },

@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
 import { getGoogleAuthUrl } from "@/lib/google/oauth";
-
-// 이 라우트는 Supabase 세션 쿠키를 읽으므로 빌드 시 정적 평가하면 안 됩니다.
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
+import { createRouteSupabaseClient } from "@/lib/supabase/route-client";
 
 function sanitizeReturnTo(value: string | null) {
   if (!value) return "/account";
@@ -19,7 +15,8 @@ function sanitizeReturnTo(value: string | null) {
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    // next/headers의 cookies()를 사용하지 않고 요청 쿠키를 직접 읽습니다.
+    const supabase = createRouteSupabaseClient(request);
 
     const {
       data: { user },
@@ -30,6 +27,7 @@ export async function GET(request: NextRequest) {
       const loginUrl = new URL("/login", request.url);
 
       const returnTo = request.nextUrl.searchParams.get("returnTo");
+
       if (returnTo) {
         loginUrl.searchParams.set("next", returnTo);
       }
