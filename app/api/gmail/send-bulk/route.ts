@@ -20,6 +20,13 @@ type CampaignMemberRow = {
   influencers: InfluencerRelation | InfluencerRelation[] | null;
 };
 
+type RequestedToRecipient = {
+  name?: string | null;
+  email?: string | null;
+  campaignInfluencerId?: string | null;
+  influencerId?: string | null;
+};
+
 function replaceTemplate(
   template: string,
   variables: Record<string, string>
@@ -38,6 +45,24 @@ function getInfluencer(member: CampaignMemberRow) {
   return Array.isArray(member.influencers)
     ? member.influencers[0] ?? null
     : member.influencers;
+}
+
+function parseEmailList(value: unknown) {
+  const source = Array.isArray(value)
+    ? value
+    : String(value ?? "").split(/[;,\n]/);
+
+  return Array.from(
+    new Set(
+      source
+        .map((item) => String(item).trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 export async function POST(request: NextRequest) {
@@ -59,8 +84,11 @@ export async function POST(request: NextRequest) {
     mode?: "preview" | "send";
     campaignId?: string;
     campaignInfluencerIds?: string[];
+    toRecipients?: RequestedToRecipient[];
     subject?: string;
     body?: string;
+    cc?: string | string[];
+    bcc?: string | string[];
   };
 
   try {
@@ -83,8 +111,66 @@ export async function POST(request: NextRequest) {
         : []
     )
   );
+  const requestedToRecipients: RequestedToRecipient[] =
+    Array.isArray(payload.toRecipients)
+      ? payload.toRecipients
+          .map((item) => ({
+            name:
+              item?.name == null
+                ? null
+                : String(item.name).trim() || null,
+            email:
+              item?.email == null
+                ? null
+                : String(item.email).trim() || null,
+            campaignInfluencerId:
+              item?.campaignInfluencerId == null
+                ? null
+                : String(item.campaignInfluencerId).trim() || null,
+            influencerId:
+              item?.influencerId == null
+                ? null
+                : String(item.influencerId).trim() || null,
+          }))
+          .filter((item) => Boolean(item.email))
+      : [];
+
   const subjectTemplate = String(payload.subject ?? "").trim();
   const bodyTemplate = String(payload.body ?? "").trim();
+  const cc = parseEmailList(payload.cc);
+  const bcc = parseEmailList(payload.bcc);
+
+  const invalidTo = requestedToRecipients
+    .map((item) => item.email)
+    .filter((email): email is string => Boolean(email))
+    .filter((email) => !isValidEmail(email));
+  const invalidCc = cc.filter((email) => !isValidEmail(email));
+  const invalidBcc = bcc.filter((email) => !isValidEmail(email));
+
+  if (
+    invalidTo.length > 0 ||
+    invalidCc.length > 0 ||
+    invalidBcc.length > 0
+  ) {
+    return NextResponse.json(
+      {
+        error: [
+          invalidTo.length
+            ? `받는 사람(To) 이메일 형식을 확인해주세요: ${invalidTo.join(", ")}`
+            : "",
+          invalidCc.length
+            ? `참조(CC) 이메일 형식을 확인해주세요: ${invalidCc.join(", ")}`
+            : "",
+          invalidBcc.length
+            ? `숨은참조(BCC) 이메일 형식을 확인해주세요: ${invalidBcc.join(", ")}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      },
+      { status: 400 }
+    );
+  }
 
   if (!campaignId) {
     return NextResponse.json(
@@ -93,9 +179,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (campaignInfluencerIds.length === 0) {
+  if (requestedToRecipients.length === 0) {
     return NextResponse.json(
-      { error: "메일을 보낼 인플루언서를 선택해주세요." },
+      { error: "받는 사람을 한 명 이상 추가해주세요." },
       { status: 400 }
     );
   }
@@ -156,14 +242,23 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const requestedCampaignInfluencerIds = Array.from(
+    new Set([
+      ...campaignInfluencerIds,
+      ...requestedToRecipients
+        .map((item) => item.campaignInfluencerId)
+        .filter((value): value is string => Boolean(value)),
+    ])
+  );
+
   const members: CampaignMemberRow[] = [];
 
   for (
     let index = 0;
-    index < campaignInfluencerIds.length;
+    index < requestedCampaignInfluencerIds.length;
     index += 100
   ) {
-    const idChunk = campaignInfluencerIds.slice(index, index + 100);
+    const idChunk = requestedCampaignInfluencerIds.slice(index, index + 100);
 
     const {
       data,
@@ -220,34 +315,34 @@ export async function POST(request: NextRequest) {
   }
 
   if (mode === "preview") {
-    const previewMember = campaignInfluencerIds
-      .map((id) => memberMap.get(id))
-      .find(Boolean);
+    const previewTarget = requestedToRecipients[0];
 
-    if (!previewMember) {
+    if (!previewTarget?.email) {
       return NextResponse.json(
-        { error: "미리보기할 수신자를 찾을 수 없습니다." },
+        { error: "미리보기할 받는 사람을 찾을 수 없습니다." },
         { status: 404 }
       );
     }
 
-    const influencer = getInfluencer(previewMember);
+    const linkedMember = previewTarget.campaignInfluencerId
+      ? memberMap.get(previewTarget.campaignInfluencerId)
+      : null;
 
-    if (!influencer) {
-      return NextResponse.json(
-        { error: "미리보기할 수신자를 찾을 수 없습니다." },
-        { status: 404 }
-      );
-    }
+    const linkedInfluencer = linkedMember
+      ? getInfluencer(linkedMember)
+      : null;
+
+    const displayName =
+      linkedInfluencer?.name?.trim() ||
+      previewTarget.name?.trim() ||
+      "담당자";
 
     const variables = {
-      인플루언서명: influencer.name?.trim() || "인플루언서",
+      인플루언서명: displayName,
       브랜드: campaign.brand ?? "",
       제품: campaign.product ?? "",
       캠페인명: campaign.name ?? "",
-
-      // 기존 영어 템플릿도 계속 동작하도록 호환 유지
-      name: influencer.name?.trim() || "인플루언서",
+      name: displayName,
       brand: campaign.brand ?? "",
       product: campaign.product ?? "",
       campaign: campaign.name ?? "",
@@ -265,8 +360,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       sender: connection.google_email,
-      recipientName: influencer.name,
-      recipientEmail: influencer.email,
+      recipientName:
+        previewTarget.name ??
+        linkedInfluencer?.name ??
+        null,
+      recipientEmail: previewTarget.email,
+      cc,
+      bcc,
       subject: previewSubject,
       body: previewBody,
       html: buildEmailHtml({
@@ -286,144 +386,127 @@ export async function POST(request: NextRequest) {
     error?: string | null;
   }> = [];
 
-  for (const campaignInfluencerId of campaignInfluencerIds) {
-    const member = memberMap.get(campaignInfluencerId);
-
-    if (!member) {
-      results.push({
-        campaignInfluencerId,
-        influencerId: "",
-        name: null,
-        email: null,
-        status: "skipped",
-        error: "캠페인 인플루언서 정보를 찾을 수 없습니다.",
-      });
-      continue;
-    }
-
-    const influencer = getInfluencer(member);
-    const influencerId = influencer?.id ?? member.influencer_id;
-    const influencerName =
-      influencer?.name?.trim() || "인플루언서";
-    const recipientEmail =
-      influencer?.email?.trim() || null;
+  for (const target of requestedToRecipients) {
+    const recipientEmail = target.email?.trim() || null;
 
     if (!recipientEmail) {
-      results.push({
-        campaignInfluencerId,
-        influencerId,
-        name: influencer?.name ?? null,
-        email: null,
-        status: "skipped",
-        error: "이메일 주소가 없습니다.",
-      });
       continue;
     }
 
+    const member = target.campaignInfluencerId
+      ? memberMap.get(target.campaignInfluencerId)
+      : null;
+
+    const influencer = member
+      ? getInfluencer(member)
+      : null;
+
+    const campaignInfluencerId =
+      target.campaignInfluencerId ?? "";
+    const influencerId =
+      target.influencerId ??
+      influencer?.id ??
+      member?.influencer_id ??
+      "";
+
+    const recipientName =
+      influencer?.name?.trim() ||
+      target.name?.trim() ||
+      null;
+
+    const templateName =
+      recipientName || "담당자";
+
     const variables = {
-      인플루언서명: influencerName,
+      인플루언서명: templateName,
       브랜드: campaign.brand ?? "",
       제품: campaign.product ?? "",
       캠페인명: campaign.name ?? "",
-
-      // 기존 영어 템플릿도 계속 동작하도록 호환 유지
-      name: influencerName,
+      name: templateName,
       brand: campaign.brand ?? "",
       product: campaign.product ?? "",
       campaign: campaign.name ?? "",
     };
 
-    const subject = replaceTemplate(subjectTemplate, variables);
-    const body = replaceTemplate(bodyTemplate, variables);
-    const html = buildEmailHtml({ body, signatureHtml });
+    const subject = replaceTemplate(
+      subjectTemplate,
+      variables
+    );
+    const body = replaceTemplate(
+      bodyTemplate,
+      variables
+    );
+    const html = buildEmailHtml({
+      body,
+      signatureHtml,
+    });
 
     try {
       const sendResult = await sendGmail({
         refreshToken: connection.refresh_token,
         to: recipientEmail,
+        cc,
+        bcc,
         subject,
         body,
         html,
       });
 
-      const now = new Date().toISOString();
-      const { error: historyError } = await admin
-        .from("campaign_email_sends")
-        .insert({
-          campaign_id: campaignId,
-          campaign_influencer_id: campaignInfluencerId,
-          influencer_id: influencerId,
-          sender_user_id: user.id,
-          recipient_email: recipientEmail,
-          subject,
-          body,
-          gmail_message_id: sendResult.messageId,
-          gmail_thread_id: sendResult.threadId,
-          status: "sent",
-          sent_at: now,
-          failed_at: null,
-          error_message: null,
-          reminder_due_at: null,
-          reminder_sent_at: null,
-          reply_detected_at: null,
-        });
+      let historyWarning: string | null = null;
 
-      if (historyError) {
-        console.error("campaign_email_sends insert error:", historyError);
+      if (campaignInfluencerId && influencerId) {
+        const now = new Date().toISOString();
+
+        const { error: historyError } = await admin
+          .from("campaign_email_sends")
+          .insert({
+            campaign_id: campaignId,
+            campaign_influencer_id: campaignInfluencerId,
+            influencer_id: influencerId,
+            sender_user_id: user.id,
+            recipient_email: recipientEmail,
+            subject,
+            body,
+            gmail_message_id: sendResult.messageId,
+            gmail_thread_id: sendResult.threadId,
+            status: "sent",
+            sent_at: now,
+            failed_at: null,
+            error_message: null,
+            reminder_due_at: null,
+            reminder_sent_at: null,
+            reply_detected_at: null,
+          });
+
+        if (historyError) {
+          console.error(
+            "campaign_email_sends insert error:",
+            historyError
+          );
+          historyWarning =
+            `메일은 발송됐지만 이력 저장 실패: ${historyError.message}`;
+        }
       }
 
       results.push({
         campaignInfluencerId,
         influencerId,
-        name: influencer?.name ?? null,
+        name: recipientName,
         email: recipientEmail,
         status: "sent",
-        error: historyError
-          ? `메일은 발송됐지만 이력 저장 실패: ${historyError.message}`
-          : null,
+        error: historyWarning,
       });
     } catch (error) {
-      const errorMessage =
-        error instanceof Error
-          ? error.message
-          : "Gmail 발송 중 오류가 발생했습니다.";
-      const now = new Date().toISOString();
-
-      const { error: failedHistoryError } = await admin
-        .from("campaign_email_sends")
-        .insert({
-          campaign_id: campaignId,
-          campaign_influencer_id: campaignInfluencerId,
-          influencer_id: influencerId,
-          sender_user_id: user.id,
-          recipient_email: recipientEmail,
-          subject,
-          body,
-          gmail_message_id: null,
-          gmail_thread_id: null,
-          status: "failed",
-          sent_at: null,
-          failed_at: now,
-          error_message: errorMessage,
-          reminder_due_at: null,
-          reminder_sent_at: null,
-          reply_detected_at: null,
-        });
-
-      if (failedHistoryError) {
-        console.error(
-          "failed campaign_email_sends insert error:",
-          failedHistoryError
-        );
-      }
-
       results.push({
         campaignInfluencerId,
         influencerId,
-        name: influencer?.name ?? null,
+        name: recipientName,
         email: recipientEmail,
         status: "failed",
-        error: errorMessage,
+        error:
+          error instanceof Error
+            ? error.message
+            : "메일 발송 중 오류가 발생했습니다.",
       });
     }
   }

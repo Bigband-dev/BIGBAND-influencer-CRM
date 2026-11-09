@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 
 export type CampaignEmailRecipient = {
   campaignInfluencerId: string;
@@ -63,11 +63,418 @@ type PreviewResult = {
   sender: string;
   recipientName: string | null;
   recipientEmail: string | null;
+  cc: string[];
+  bcc: string[];
   subject: string;
   body: string;
   html: string;
   hasSignature: boolean;
 };
+
+type GoogleContactSuggestion = {
+  name: string | null;
+  email: string;
+  source: "directory" | "contact";
+};
+
+type RecipientChip = {
+  name: string | null;
+  email: string;
+  source?: "directory" | "contact" | "influencer" | "manual";
+  campaignInfluencerId?: string;
+  influencerId?: string;
+};
+
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function addRecipient(
+  current: RecipientChip[],
+  recipient: RecipientChip
+) {
+  const email = recipient.email.trim();
+  if (!email) return current;
+
+  const exists = current.some(
+    (item) =>
+      normalizeEmail(item.email) === normalizeEmail(email)
+  );
+
+  if (exists) return current;
+
+  return [
+    ...current,
+    {
+      ...recipient,
+      email,
+    },
+  ];
+}
+
+function addRecipients(
+  current: RecipientChip[],
+  recipients: RecipientChip[]
+) {
+  return recipients.reduce(
+    (result, recipient) => addRecipient(result, recipient),
+    current
+  );
+}
+
+function RecipientChipField({
+  label,
+  description,
+  recipients,
+  setRecipients,
+  disabled,
+  selectedInfluencers,
+  onNeedsReconnect,
+  influencerButtonLabel = "선택 인플루언서 추가",
+  warnOnInfluencerAdd = true,
+}: {
+  label: string;
+  description: string;
+  recipients: RecipientChip[];
+  setRecipients: Dispatch<SetStateAction<RecipientChip[]>>;
+  disabled: boolean;
+  selectedInfluencers: RecipientChip[];
+  onNeedsReconnect: () => void;
+  influencerButtonLabel?: string;
+  warnOnInfluencerAdd?: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [suggestions, setSuggestions] = useState<
+    GoogleContactSuggestion[]
+  >([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const trimmed = query.trim();
+
+    if (trimmed.length < 1) {
+      setSuggestions([]);
+      setSearchError(null);
+      return;
+    }
+
+    const timer = window.setTimeout(async () => {
+      setSearching(true);
+
+      try {
+        const response = await fetch(
+          `/api/google/contacts/search?q=${encodeURIComponent(trimmed)}`
+        );
+
+        const data = await response.json();
+
+        if (
+          response.status === 409 &&
+          data.code === "GMAIL_NOT_CONNECTED"
+        ) {
+          onNeedsReconnect();
+          setSuggestions([]);
+          return;
+        }
+
+        if (!response.ok) {
+          setSuggestions([]);
+          setSearchError(
+            data.error || `주소록 검색에 실패했습니다. HTTP ${response.status}`
+          );
+          return;
+        }
+
+        if (data.needsReconnect) {
+          onNeedsReconnect();
+        }
+
+        const nextSuggestions = data.contacts ?? [];
+        setSuggestions(nextSuggestions);
+
+        if (nextSuggestions.length === 0) {
+          const details = [
+            data.directoryError
+              ? `회사 주소록: ${data.directoryError}`
+              : "",
+            data.contactsError
+              ? `개인 연락처: ${data.contactsError}`
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" / ");
+
+          setSearchError(
+            details ||
+              "일치하는 이름 또는 이메일을 찾지 못했습니다."
+          );
+        } else {
+          setSearchError(null);
+        }
+      } catch (error) {
+        setSuggestions([]);
+        setSearchError(
+          error instanceof Error
+            ? error.message
+            : "주소록 검색 중 오류가 발생했습니다."
+        );
+      } finally {
+        setSearching(false);
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [query, onNeedsReconnect]);
+
+  const addManualEmail = () => {
+    const email = query.trim();
+
+    if (!email) return;
+
+    if (!isValidEmail(email)) {
+      alert("올바른 이메일 주소를 입력해주세요.");
+      return;
+    }
+
+    setRecipients((current) =>
+      addRecipient(current, {
+        name: null,
+        email,
+        source: "manual",
+      })
+    );
+
+    setQuery("");
+    setSuggestions([]);
+    setSearchError(null);
+  };
+
+  const addAllInfluencers = () => {
+    if (selectedInfluencers.length === 0) {
+      alert(
+        "현재 선택한 인플루언서 중 이메일이 등록된 사람이 없습니다."
+      );
+      return;
+    }
+
+    if (warnOnInfluencerAdd) {
+      const confirmed = window.confirm(
+        `선택한 인플루언서 ${selectedInfluencers.length}명을 ${label}에 추가할까요?\n\n` +
+          "현재 메일은 받는 사람(To) 각각에게 개별 발송되므로, 같은 인플루언서를 CC/BCC에도 넣으면 중복 수신될 수 있습니다."
+      );
+
+      if (!confirmed) return;
+    }
+
+    setRecipients((current) =>
+      addRecipients(current, selectedInfluencers)
+    );
+  };
+
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <label className="text-sm font-semibold text-slate-700">
+            {label}
+          </label>
+          <p className="mt-1 text-xs text-slate-500">
+            {description}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={addAllInfluencers}
+          disabled={
+            disabled || selectedInfluencers.length === 0
+          }
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-40"
+        >
+          {influencerButtonLabel} ({selectedInfluencers.length}명)
+        </button>
+      </div>
+
+      <div className="relative">
+        <div
+          className={`flex min-h-[48px] flex-wrap items-center gap-2 rounded-lg border bg-white px-3 py-2 ${
+            disabled
+              ? "border-slate-200 bg-slate-100"
+              : "border-slate-300 focus-within:border-slate-500"
+          }`}
+        >
+          {recipients.map((recipient) => (
+            <span
+              key={recipient.email.toLowerCase()}
+              className="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-3 py-1.5 text-sm text-slate-800"
+              title={
+                recipient.name
+                  ? `${recipient.name} <${recipient.email}>`
+                  : recipient.email
+              }
+            >
+              <span className="max-w-[260px] truncate">
+                {recipient.name || recipient.email}
+              </span>
+
+              {recipient.name && (
+                <span className="hidden max-w-[220px] truncate text-xs text-slate-500 sm:inline">
+                  {recipient.email}
+                </span>
+              )}
+
+              <button
+                type="button"
+                onClick={() =>
+                  setRecipients((current) =>
+                    current.filter(
+                      (item) =>
+                        normalizeEmail(item.email) !==
+                        normalizeEmail(recipient.email)
+                    )
+                  )
+                }
+                disabled={disabled}
+                className="rounded-full px-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 disabled:opacity-40"
+                aria-label={`${recipient.email} 제거`}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+
+          <input
+            type="text"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" ||
+                event.key === "," ||
+                event.key === ";"
+              ) {
+                if (query.trim().includes("@")) {
+                  event.preventDefault();
+                  addManualEmail();
+                }
+              }
+
+              if (
+                event.key === "Backspace" &&
+                !query &&
+                recipients.length > 0
+              ) {
+                setRecipients((current) =>
+                  current.slice(0, -1)
+                );
+              }
+            }}
+            placeholder={
+              recipients.length === 0
+                ? "이름 또는 이메일 검색"
+                : ""
+            }
+            disabled={disabled}
+            className="min-w-[180px] flex-1 border-0 bg-transparent px-1 py-1.5 text-sm outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
+          />
+
+          {searching && (
+            <span className="text-xs text-slate-400">
+              검색 중...
+            </span>
+          )}
+        </div>
+
+        {query.trim() && searchError && suggestions.length === 0 && (
+          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+            {searchError}
+          </div>
+        )}
+
+        {query.trim() && suggestions.length > 0 && (
+          <div className="absolute z-40 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
+            {suggestions.map((contact) => (
+              <button
+                key={`${contact.source}-${contact.email}`}
+                type="button"
+                onMouseDown={(event) =>
+                  event.preventDefault()
+                }
+                onClick={() => {
+                  setRecipients((current) =>
+                    addRecipient(current, {
+                      name: contact.name,
+                      email: contact.email,
+                      source: contact.source,
+                    })
+                  );
+                  setQuery("");
+                  setSuggestions([]);
+                }}
+                className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left hover:bg-slate-50"
+              >
+                <span className="min-w-0">
+                  <span className="flex items-center gap-2">
+                    <span className="truncate text-sm font-semibold text-slate-800">
+                      {contact.name || contact.email}
+                    </span>
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        contact.source === "directory"
+                          ? "bg-blue-50 text-blue-700"
+                          : "bg-slate-100 text-slate-500"
+                      }`}
+                    >
+                      {contact.source === "directory"
+                        ? "회사"
+                        : "연락처"}
+                    </span>
+                  </span>
+
+                  {contact.name && (
+                    <span className="mt-0.5 block truncate text-xs text-slate-500">
+                      {contact.email}
+                    </span>
+                  )}
+                </span>
+
+                <span className="shrink-0 text-xs text-slate-400">
+                  추가
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {query.trim().includes("@") &&
+          isValidEmail(query.trim()) &&
+          !suggestions.some(
+            (item) =>
+              normalizeEmail(item.email) ===
+              normalizeEmail(query)
+          ) && (
+            <button
+              type="button"
+              onClick={addManualEmail}
+              className="absolute z-30 mt-1 w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-left text-sm shadow-lg hover:bg-slate-50"
+            >
+              <span className="font-semibold">
+                {query.trim()}
+              </span>
+              <span className="ml-2 text-xs text-slate-500">
+                직접 추가
+              </span>
+            </button>
+          )}
+      </div>
+    </div>
+  );
+}
 
 export default function CampaignEmailModal({
   open,
@@ -85,24 +492,61 @@ export default function CampaignEmailModal({
   const [presetId, setPresetId] = useState("collaboration");
   const [subject, setSubject] = useState(DRAFT_PRESETS[0].subject);
   const [body, setBody] = useState(DRAFT_PRESETS[0].body);
+  const [toRecipients, setToRecipients] = useState<RecipientChip[]>([]);
+  const [ccRecipients, setCcRecipients] = useState<RecipientChip[]>([]);
+  const [bccRecipients, setBccRecipients] = useState<RecipientChip[]>([]);
+  const [showCopyFields, setShowCopyFields] = useState(true);
+  const [contactsNeedReconnect, setContactsNeedReconnect] = useState(false);
   const [sending, setSending] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [result, setResult] = useState<SendResult | null>(null);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [activeTab, setActiveTab] = useState<"write" | "preview">("write");
 
-  const mailableCount = useMemo(
+  const selectedMailableCount = useMemo(
     () => recipients.filter((item) => Boolean(item.email?.trim())).length,
     [recipients]
   );
 
-  const missingEmailCount = recipients.length - mailableCount;
+  const mailableCount = toRecipients.length;
+  const missingEmailCount = recipients.length - selectedMailableCount;
+
+  const selectedInfluencerRecipients = useMemo(
+    () =>
+      recipients
+        .filter((item) => Boolean(item.email?.trim()))
+        .map((item) => ({
+          name: item.name,
+          email: item.email!.trim(),
+          source: "influencer" as const,
+          campaignInfluencerId: item.campaignInfluencerId,
+          influencerId: item.influencerId,
+        }))
+        .filter(
+          (item, index, items) =>
+            items.findIndex(
+              (candidate) =>
+                normalizeEmail(candidate.email) ===
+                normalizeEmail(item.email)
+            ) === index
+        ),
+    [recipients]
+  );
 
   useEffect(() => {
     if (!open) return;
+    setToRecipients(selectedInfluencerRecipients);
     setResult(null);
     setPreview(null);
     setActiveTab("write");
+  }, [open, selectedInfluencerRecipients]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    fetch("/api/google/contacts/search?warmup=1").catch(
+      () => undefined
+    );
   }, [open]);
 
   if (!open) return null;
@@ -136,6 +580,14 @@ export default function CampaignEmailModal({
     onClose();
   };
 
+  const reconnectGoogleContacts = () => {
+    const returnTo =
+      window.location.pathname + window.location.search;
+
+    window.location.href =
+      `/api/google/oauth/start?returnTo=${encodeURIComponent(returnTo)}`;
+  };
+
   const requestApi = async (mode: "preview" | "send") => {
     const response = await fetch("/api/gmail/send-bulk", {
       method: "POST",
@@ -145,11 +597,19 @@ export default function CampaignEmailModal({
       body: JSON.stringify({
         mode,
         campaignId,
-        campaignInfluencerIds: recipients.map(
-          (item) => item.campaignInfluencerId
-        ),
+        campaignInfluencerIds: toRecipients
+          .map((item) => item.campaignInfluencerId)
+          .filter((value): value is string => Boolean(value)),
+        toRecipients: toRecipients.map((item) => ({
+          name: item.name,
+          email: item.email,
+          campaignInfluencerId: item.campaignInfluencerId ?? null,
+          influencerId: item.influencerId ?? null,
+        })),
         subject,
         body,
+        cc: ccRecipients.map((item) => item.email),
+        bcc: bccRecipients.map((item) => item.email),
       }),
     });
 
@@ -176,7 +636,6 @@ export default function CampaignEmailModal({
         );
         const returnTo =
           window.location.pathname + window.location.search;
-
         window.location.href =
           `/api/google/oauth/start?returnTo=${encodeURIComponent(returnTo)}`;
 
@@ -195,6 +654,11 @@ export default function CampaignEmailModal({
   };
 
   const requestPreview = async () => {
+    if (toRecipients.length === 0) {
+      alert("받는 사람을 한 명 이상 추가해주세요.");
+      return;
+    }
+
     if (!subject.trim()) {
       alert("메일 제목을 입력해주세요.");
       return;
@@ -229,6 +693,11 @@ export default function CampaignEmailModal({
   const handleSend = async () => {
     if (sending || mailableCount === 0) return;
 
+    if (toRecipients.length === 0) {
+      alert("받는 사람을 한 명 이상 추가해주세요.");
+      return;
+    }
+
     if (!subject.trim()) {
       alert("메일 제목을 입력해주세요.");
       return;
@@ -240,7 +709,7 @@ export default function CampaignEmailModal({
     }
 
     const confirmed = window.confirm(
-      `선택한 ${recipients.length}명 중 이메일이 있는 ${mailableCount}명에게 메일을 발송하시겠습니까?`
+      `받는 사람 ${toRecipients.length}명에게 각각 개별 메일을 발송하시겠습니까?`
     );
 
     if (!confirmed) return;
@@ -367,6 +836,100 @@ export default function CampaignEmailModal({
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4">
+                <RecipientChipField
+                  label="받는 사람 (To)"
+                  description="현재 선택한 인플루언서가 기본으로 들어갑니다. 팀원/외부 이메일을 검색하거나 직접 입력할 수 있으며, 각 주소로 개별 메일이 발송됩니다."
+                  recipients={toRecipients}
+                  setRecipients={(next) => {
+                    setToRecipients(next);
+                    setPreview(null);
+                  }}
+                  disabled={sending}
+                  selectedInfluencers={selectedInfluencerRecipients}
+                  onNeedsReconnect={() =>
+                    setContactsNeedReconnect(true)
+                  }
+                  influencerButtonLabel="선택 인플루언서 다시 추가"
+                  warnOnInfluencerAdd={false}
+                />
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">
+                      참조 / 숨은참조
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      이름/이메일을 검색하면 회사 Google Workspace 디렉터리와 개인 연락처에서 후보가 표시됩니다.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowCopyFields((value) => !value)}
+                    className="shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    {showCopyFields ? "접기" : "참조/숨은참조 열기"}
+                  </button>
+                </div>
+
+                {contactsNeedReconnect && (
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-semibold text-amber-900">
+                        Google 회사 주소록/연락처 권한이 필요합니다.
+                      </p>
+                      <p className="mt-1 text-xs text-amber-700">
+                        직접 입력은 그대로 사용할 수 있고, 회사 디렉터리 및 연락처 자동완성을 사용하려면 Gmail을 한 번 다시 연결해주세요.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={reconnectGoogleContacts}
+                      className="rounded-lg bg-amber-900 px-3 py-2 text-xs font-semibold text-white"
+                    >
+                      Gmail 다시 연결
+                    </button>
+                  </div>
+                )}
+
+                {showCopyFields && (
+                  <div className="mt-4 grid gap-5">
+                    <RecipientChipField
+                      label="참조 (CC)"
+                      description="회사 디렉터리나 개인 Google 연락처를 검색하거나 이메일을 직접 입력할 수 있습니다."
+                      recipients={ccRecipients}
+                      setRecipients={(next) => {
+                        setCcRecipients(next);
+                        setPreview(null);
+                      }}
+                      disabled={sending}
+                      selectedInfluencers={selectedInfluencerRecipients}
+                      onNeedsReconnect={() =>
+                        setContactsNeedReconnect(true)
+                      }
+                    />
+
+                    <RecipientChipField
+                      label="숨은참조 (BCC)"
+                      description="추가된 주소는 다른 수신자에게 표시되지 않습니다."
+                      recipients={bccRecipients}
+                      setRecipients={(next) => {
+                        setBccRecipients(next);
+                        setPreview(null);
+                      }}
+                      disabled={sending}
+                      selectedInfluencers={selectedInfluencerRecipients}
+                      onNeedsReconnect={() =>
+                        setContactsNeedReconnect(true)
+                      }
+                    />
+                  </div>
+                )}
               </div>
 
               <div>
@@ -506,6 +1069,23 @@ export default function CampaignEmailModal({
                           : ""}
                       </p>
                     </div>
+
+                    {(preview.cc?.length > 0 || preview.bcc?.length > 0) && (
+                      <div className="mt-3 space-y-1 text-xs text-slate-600">
+                        {preview.cc?.length > 0 && (
+                          <p>
+                            <span className="font-semibold">참조(CC):</span>{" "}
+                            {preview.cc.join(", ")}
+                          </p>
+                        )}
+                        {preview.bcc?.length > 0 && (
+                          <p>
+                            <span className="font-semibold">숨은참조(BCC):</span>{" "}
+                            {preview.bcc.join(", ")}
+                          </p>
+                        )}
+                      </div>
+                    )}
 
                     <p className="mt-3">
                       <span className="font-semibold">제목:</span>{" "}

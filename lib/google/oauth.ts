@@ -1,12 +1,14 @@
 import { google } from "googleapis";
 
-const REQUIRED_GOOGLE_ENV = [
-  "GOOGLE_CLIENT_ID",
-  "GOOGLE_CLIENT_SECRET",
-  "GOOGLE_REDIRECT_URI",
-] as const;
+const GOOGLE_SCOPES = [
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/gmail.settings.basic",
+  "https://www.googleapis.com/auth/contacts.readonly",
+  "https://www.googleapis.com/auth/directory.readonly",
+];
 
-function requireGoogleEnv(name: (typeof REQUIRED_GOOGLE_ENV)[number]) {
+function requireEnv(name: string) {
   const value = process.env[name]?.trim();
 
   if (!value) {
@@ -17,14 +19,10 @@ function requireGoogleEnv(name: (typeof REQUIRED_GOOGLE_ENV)[number]) {
 }
 
 export function createGoogleOAuthClient() {
-  const clientId = requireGoogleEnv("GOOGLE_CLIENT_ID");
-  const clientSecret = requireGoogleEnv("GOOGLE_CLIENT_SECRET");
-  const redirectUri = requireGoogleEnv("GOOGLE_REDIRECT_URI");
-
   return new google.auth.OAuth2(
-    clientId,
-    clientSecret,
-    redirectUri
+    requireEnv("GOOGLE_CLIENT_ID"),
+    requireEnv("GOOGLE_CLIENT_SECRET"),
+    requireEnv("GOOGLE_REDIRECT_URI")
   );
 }
 
@@ -35,11 +33,7 @@ export function getGoogleAuthUrl(returnTo = "/account") {
     access_type: "offline",
     prompt: "consent",
     include_granted_scopes: true,
-    scope: [
-      "https://www.googleapis.com/auth/gmail.send",
-      "https://www.googleapis.com/auth/gmail.settings.basic",
-      "https://www.googleapis.com/auth/userinfo.email",
-    ],
+    scope: GOOGLE_SCOPES,
     state: returnTo,
   });
 }

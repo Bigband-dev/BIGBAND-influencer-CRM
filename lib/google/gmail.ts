@@ -80,6 +80,8 @@ export async function getGmailSignature({
 export async function sendGmail({
   refreshToken,
   to,
+  cc,
+  bcc,
   subject,
   body,
   html,
@@ -87,6 +89,8 @@ export async function sendGmail({
 }: {
   refreshToken: string;
   to: string;
+  cc?: string[];
+  bcc?: string[];
   subject: string;
   body: string;
   html?: string | null;
@@ -109,6 +113,8 @@ export async function sendGmail({
 
   const messageLines = [
     `To: ${to}`,
+    ...(cc?.length ? [`Cc: ${cc.join(", ")}`] : []),
+    ...(bcc?.length ? [`Bcc: ${bcc.join(", ")}`] : []),
     `Subject: ${encodeHeader(subject)}`,
     "MIME-Version: 1.0",
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
