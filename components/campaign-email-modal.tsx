@@ -58,9 +58,7 @@ type SendResult = {
   skipped: number;
 };
 
-type PreviewResult = {
-  success: boolean;
-  sender: string;
+type PreviewItem = {
   recipientName: string | null;
   recipientEmail: string | null;
   cc: string[];
@@ -68,7 +66,14 @@ type PreviewResult = {
   subject: string;
   body: string;
   html: string;
+};
+
+type PreviewResult = {
+  success: boolean;
+  sender: string;
+  previews: PreviewItem[];
   hasSignature: boolean;
+  individualizeBcc?: boolean;
 };
 
 type GoogleContactSuggestion = {
@@ -495,12 +500,17 @@ export default function CampaignEmailModal({
   const [toRecipients, setToRecipients] = useState<RecipientChip[]>([]);
   const [ccRecipients, setCcRecipients] = useState<RecipientChip[]>([]);
   const [bccRecipients, setBccRecipients] = useState<RecipientChip[]>([]);
+  const [individualizeBcc, setIndividualizeBcc] = useState(false);
   const [showCopyFields, setShowCopyFields] = useState(true);
   const [contactsNeedReconnect, setContactsNeedReconnect] = useState(false);
   const [sending, setSending] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [result, setResult] = useState<SendResult | null>(null);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const [reviewedPreviewEmails, setReviewedPreviewEmails] = useState<Set<string>>(
+    () => new Set()
+  );
   const [activeTab, setActiveTab] = useState<"write" | "preview">("write");
 
   const selectedMailableCount = useMemo(
@@ -508,8 +518,22 @@ export default function CampaignEmailModal({
     [recipients]
   );
 
-  const mailableCount = toRecipients.length;
+  const individualizedRecipients = useMemo(
+    () =>
+      individualizeBcc
+        ? addRecipients(toRecipients, bccRecipients)
+        : toRecipients,
+    [toRecipients, bccRecipients, individualizeBcc]
+  );
+
+  const mailableCount = individualizedRecipients.length;
   const missingEmailCount = recipients.length - selectedMailableCount;
+
+  const previewItems = preview?.previews ?? [];
+  const currentPreview = previewItems[previewIndex] ?? null;
+  const allPreviewsReviewed =
+    previewItems.length > 0 &&
+    reviewedPreviewEmails.size >= previewItems.length;
 
   const selectedInfluencerRecipients = useMemo(
     () =>
@@ -536,8 +560,11 @@ export default function CampaignEmailModal({
   useEffect(() => {
     if (!open) return;
     setToRecipients(selectedInfluencerRecipients);
+    setIndividualizeBcc(false);
     setResult(null);
     setPreview(null);
+    setPreviewIndex(0);
+    setReviewedPreviewEmails(new Set());
     setActiveTab("write");
   }, [open, selectedInfluencerRecipients]);
 
@@ -570,6 +597,8 @@ export default function CampaignEmailModal({
     setSubject(preset.subject);
     setBody(preset.body);
     setPreview(null);
+    setPreviewIndex(0);
+    setReviewedPreviewEmails(new Set());
     setActiveTab("write");
   };
 
@@ -577,6 +606,8 @@ export default function CampaignEmailModal({
     if (sending || previewing) return;
     setResult(null);
     setPreview(null);
+    setPreviewIndex(0);
+    setReviewedPreviewEmails(new Set());
     onClose();
   };
 
@@ -597,7 +628,7 @@ export default function CampaignEmailModal({
       body: JSON.stringify({
         mode,
         campaignId,
-        campaignInfluencerIds: toRecipients
+        campaignInfluencerIds: individualizedRecipients
           .map((item) => item.campaignInfluencerId)
           .filter((value): value is string => Boolean(value)),
         toRecipients: toRecipients.map((item) => ({
@@ -606,6 +637,13 @@ export default function CampaignEmailModal({
           campaignInfluencerId: item.campaignInfluencerId ?? null,
           influencerId: item.influencerId ?? null,
         })),
+        bccRecipients: bccRecipients.map((item) => ({
+          name: item.name,
+          email: item.email,
+          campaignInfluencerId: item.campaignInfluencerId ?? null,
+          influencerId: item.influencerId ?? null,
+        })),
+        individualizeBcc,
         subject,
         body,
         cc: ccRecipients.map((item) => item.email),
@@ -654,8 +692,8 @@ export default function CampaignEmailModal({
   };
 
   const requestPreview = async () => {
-    if (toRecipients.length === 0) {
-      alert("받는 사람을 한 명 이상 추가해주세요.");
+    if (individualizedRecipients.length === 0) {
+      alert("받는 사람 또는 숨은참조 수신자를 한 명 이상 추가해주세요.");
       return;
     }
 
@@ -673,7 +711,24 @@ export default function CampaignEmailModal({
 
     try {
       const data = (await requestApi("preview")) as PreviewResult;
+
+      if (!data.previews?.length) {
+        throw new Error("생성된 메일 미리보기가 없습니다.");
+      }
+
       setPreview(data);
+      setPreviewIndex(0);
+
+      const firstEmail = data.previews[0]?.recipientEmail;
+
+      setReviewedPreviewEmails(
+        new Set(
+          firstEmail
+            ? [normalizeEmail(firstEmail)]
+            : []
+        )
+      );
+
       setActiveTab("preview");
     } catch (error) {
       const code = (error as Error & { code?: string })?.code;
@@ -690,11 +745,45 @@ export default function CampaignEmailModal({
     }
   };
 
+  const openPreviewAt = (nextIndex: number) => {
+    if (!previewItems.length) return;
+
+    const safeIndex = Math.max(
+      0,
+      Math.min(nextIndex, previewItems.length - 1)
+    );
+
+    setPreviewIndex(safeIndex);
+
+    const email = previewItems[safeIndex]?.recipientEmail;
+    if (email) {
+      setReviewedPreviewEmails((current) => {
+        const next = new Set(current);
+        next.add(normalizeEmail(email));
+        return next;
+      });
+    }
+  };
+
   const handleSend = async () => {
     if (sending || mailableCount === 0) return;
 
-    if (toRecipients.length === 0) {
-      alert("받는 사람을 한 명 이상 추가해주세요.");
+    if (individualizedRecipients.length === 0) {
+      alert("받는 사람 또는 숨은참조 수신자를 한 명 이상 추가해주세요.");
+      return;
+    }
+
+    if (!previewItems.length) {
+      alert("먼저 메일 미리보기를 생성해주세요.");
+      setActiveTab("preview");
+      return;
+    }
+
+    if (!allPreviewsReviewed) {
+      alert(
+        `전체 미리보기를 확인해주세요. (${reviewedPreviewEmails.size}/${previewItems.length})`
+      );
+      setActiveTab("preview");
       return;
     }
 
@@ -709,7 +798,9 @@ export default function CampaignEmailModal({
     }
 
     const confirmed = window.confirm(
-      `받는 사람 ${toRecipients.length}명에게 각각 개별 메일을 발송하시겠습니까?`
+      individualizeBcc
+        ? `받는 사람 + 숨은참조 총 ${individualizedRecipients.length}명에게 각각 개인화된 메일을 발송하시겠습니까?\n\n참조(CC)는 각 메일에 공통으로 포함됩니다.`
+        : `받는 사람 ${toRecipients.length}명에게 각각 개별 메일을 발송하시겠습니까?`
     );
 
     if (!confirmed) return;
@@ -840,12 +931,14 @@ export default function CampaignEmailModal({
 
               <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4">
                 <RecipientChipField
-                  label="받는 사람 (To)"
+                  label="받는 사람"
                   description="현재 선택한 인플루언서가 기본으로 들어갑니다. 팀원/외부 이메일을 검색하거나 직접 입력할 수 있으며, 각 주소로 개별 메일이 발송됩니다."
                   recipients={toRecipients}
                   setRecipients={(next) => {
                     setToRecipients(next);
                     setPreview(null);
+                    setPreviewIndex(0);
+                    setReviewedPreviewEmails(new Set());
                   }}
                   disabled={sending}
                   selectedInfluencers={selectedInfluencerRecipients}
@@ -900,12 +993,14 @@ export default function CampaignEmailModal({
                 {showCopyFields && (
                   <div className="mt-4 grid gap-5">
                     <RecipientChipField
-                      label="참조 (CC)"
+                      label="참조"
                       description="회사 디렉터리나 개인 Google 연락처를 검색하거나 이메일을 직접 입력할 수 있습니다."
                       recipients={ccRecipients}
                       setRecipients={(next) => {
                         setCcRecipients(next);
                         setPreview(null);
+                        setPreviewIndex(0);
+                        setReviewedPreviewEmails(new Set());
                       }}
                       disabled={sending}
                       selectedInfluencers={selectedInfluencerRecipients}
@@ -915,12 +1010,14 @@ export default function CampaignEmailModal({
                     />
 
                     <RecipientChipField
-                      label="숨은참조 (BCC)"
+                      label="숨은참조"
                       description="추가된 주소는 다른 수신자에게 표시되지 않습니다."
                       recipients={bccRecipients}
                       setRecipients={(next) => {
                         setBccRecipients(next);
                         setPreview(null);
+                        setPreviewIndex(0);
+                        setReviewedPreviewEmails(new Set());
                       }}
                       disabled={sending}
                       selectedInfluencers={selectedInfluencerRecipients}
@@ -928,6 +1025,47 @@ export default function CampaignEmailModal({
                         setContactsNeedReconnect(true)
                       }
                     />
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">
+                            숨은참조 개별 발송
+                          </p>
+                          <p className="mt-1 text-xs leading-5 text-slate-500">
+                            받는 사람과 숨은참조를 모두 개별 발송합니다.
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIndividualizeBcc((current) => !current);
+                            setPreview(null);
+                            setPreviewIndex(0);
+                            setReviewedPreviewEmails(new Set());
+                          }}
+                          disabled={sending}
+                          className={
+                            individualizeBcc
+                              ? "shrink-0 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
+                              : "shrink-0 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                          }
+                        >
+                          {individualizeBcc ? "켜짐" : "꺼짐"}
+                        </button>
+                      </div>
+
+                      {individualizeBcc && (
+                        <div className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800">
+                          현재 개별 발송 대상: {individualizedRecipients.length}명
+                          · To {toRecipients.length}명
+                          · BCC {bccRecipients.length}명
+                          <br />
+                          같은 이메일이 To와 BCC에 모두 있으면 한 번만 발송됩니다.
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1049,74 +1187,115 @@ export default function CampaignEmailModal({
             </>
           ) : (
             <div className="space-y-4">
-              {!preview ? (
-                <div className="rounded-xl border border-dashed border-slate-300 px-6 py-12 text-center text-sm text-slate-500">
-                  미리보기를 생성해주세요.
+              {!preview || !currentPreview ? (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-6 py-12 text-center text-sm text-slate-500">
+                  미리보기를 생성하면 각 수신자에게 실제로 발송될 메일을
+                  한 명씩 확인할 수 있습니다.
                 </div>
               ) : (
-                <>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm">
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <p>
-                        <span className="font-semibold">보내는 사람:</span>{" "}
-                        {preview.sender}
+                <div className="space-y-4">
+                  <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">
+                        수신자별 미리보기
                       </p>
-                      <p>
-                        <span className="font-semibold">미리보기 수신자:</span>{" "}
-                        {preview.recipientName || "-"}{" "}
-                        {preview.recipientEmail
-                          ? `(${preview.recipientEmail})`
-                          : ""}
+                      <p className="mt-1 text-xs text-slate-500">
+                        {previewIndex + 1} / {previewItems.length}
+                        {" · "}
+                        확인 완료 {reviewedPreviewEmails.size} / {previewItems.length}
                       </p>
                     </div>
 
-                    {(preview.cc?.length > 0 || preview.bcc?.length > 0) && (
-                      <div className="mt-3 space-y-1 text-xs text-slate-600">
-                        {preview.cc?.length > 0 && (
-                          <p>
-                            <span className="font-semibold">참조(CC):</span>{" "}
-                            {preview.cc.join(", ")}
-                          </p>
-                        )}
-                        {preview.bcc?.length > 0 && (
-                          <p>
-                            <span className="font-semibold">숨은참조(BCC):</span>{" "}
-                            {preview.bcc.join(", ")}
-                          </p>
-                        )}
-                      </div>
-                    )}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openPreviewAt(previewIndex - 1)}
+                        disabled={previewIndex === 0}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-30"
+                      >
+                        ← 이전
+                      </button>
 
-                    <p className="mt-3">
-                      <span className="font-semibold">제목:</span>{" "}
-                      {preview.subject}
-                    </p>
-
-                    <p className="mt-2 text-xs text-slate-500">
-                      Gmail 개인 서명: {preview.hasSignature ? "포함됨" : "설정된 서명 없음"}
-                    </p>
+                      <button
+                        type="button"
+                        onClick={() => openPreviewAt(previewIndex + 1)}
+                        disabled={previewIndex >= previewItems.length - 1}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-30"
+                      >
+                        다음 →
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="overflow-hidden rounded-xl border border-slate-300 bg-white">
-                    <div className="border-b border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
-                      실제 메일 본문 미리보기
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                    <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
+                      <div className="grid gap-1.5 text-xs text-slate-600">
+                        <p>
+                          <span className="font-semibold text-slate-700">
+                            보내는 사람:
+                          </span>{" "}
+                          {preview.sender}
+                        </p>
+
+                        <p>
+                          <span className="font-semibold text-slate-700">
+                            받는 사람:
+                          </span>{" "}
+                          {currentPreview.recipientName || "-"}{" "}
+                          {currentPreview.recipientEmail
+                            ? `(${currentPreview.recipientEmail})`
+                            : ""}
+                        </p>
+
+                        {currentPreview.cc?.length > 0 && (
+                          <p>
+                            <span className="font-semibold text-slate-700">
+                              참조:
+                            </span>{" "}
+                            {currentPreview.cc.join(", ")}
+                          </p>
+                        )}
+
+                        {currentPreview.bcc?.length > 0 && (
+                          <p>
+                            <span className="font-semibold text-slate-700">
+                              숨은참조:
+                            </span>{" "}
+                            {currentPreview.bcc.join(", ")}
+                          </p>
+                        )}
+
+                        <p className="pt-1 text-sm font-semibold text-slate-900">
+                          {currentPreview.subject}
+                        </p>
+
+                        <p className="text-[11px] text-slate-400">
+                          Gmail 개인 서명:{" "}
+                          {preview.hasSignature ? "포함됨" : "설정된 서명 없음"}
+                        </p>
+                      </div>
                     </div>
+
                     <iframe
-                      title="메일 미리보기"
-                      srcDoc={preview.html}
+                      title={`메일 미리보기 ${previewIndex + 1}`}
+                      srcDoc={currentPreview.html}
                       sandbox=""
-                      className="h-[420px] w-full bg-white"
+                      className="h-[440px] w-full bg-white"
                     />
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("write")}
-                    className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  <div
+                    className={
+                      allPreviewsReviewed
+                        ? "rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+                        : "rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+                    }
                   >
-                    다시 수정
-                  </button>
-                </>
+                    {allPreviewsReviewed
+                      ? `전체 ${previewItems.length}명의 메일 미리보기를 확인했습니다. 이제 발송할 수 있습니다.`
+                      : `아직 ${previewItems.length - reviewedPreviewEmails.size}명의 미리보기를 확인해야 합니다. 이전/다음 버튼으로 전부 확인해주세요.`}
+                  </div>
+                </div>
               )}
             </div>
           )}
@@ -1150,7 +1329,12 @@ export default function CampaignEmailModal({
             <button
               type="button"
               onClick={handleSend}
-              disabled={sending || previewing || mailableCount === 0}
+              disabled={
+                sending ||
+                previewing ||
+                mailableCount === 0 ||
+                !allPreviewsReviewed
+              }
               className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {sending ? "메일 발송 중..." : `${mailableCount}명에게 발송`}

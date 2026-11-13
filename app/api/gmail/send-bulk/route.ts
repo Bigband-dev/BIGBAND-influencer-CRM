@@ -85,6 +85,8 @@ export async function POST(request: NextRequest) {
     campaignId?: string;
     campaignInfluencerIds?: string[];
     toRecipients?: RequestedToRecipient[];
+    bccRecipients?: RequestedToRecipient[];
+    individualizeBcc?: boolean;
     subject?: string;
     body?: string;
     cc?: string | string[];
@@ -135,12 +137,60 @@ export async function POST(request: NextRequest) {
           .filter((item) => Boolean(item.email))
       : [];
 
+  const requestedBccRecipients: RequestedToRecipient[] =
+    Array.isArray(payload.bccRecipients)
+      ? payload.bccRecipients
+          .map((item) => ({
+            name:
+              item?.name == null
+                ? null
+                : String(item.name).trim() || null,
+            email:
+              item?.email == null
+                ? null
+                : String(item.email).trim() || null,
+            campaignInfluencerId:
+              item?.campaignInfluencerId == null
+                ? null
+                : String(item.campaignInfluencerId).trim() || null,
+            influencerId:
+              item?.influencerId == null
+                ? null
+                : String(item.influencerId).trim() || null,
+          }))
+          .filter((item) => Boolean(item.email))
+      : [];
+
+  const individualizeBcc = payload.individualizeBcc === true;
+
+  const dedupeRequestedRecipients = (
+    items: RequestedToRecipient[]
+  ) => {
+    const seen = new Set<string>();
+
+    return items.filter((item) => {
+      const email = String(item.email ?? "").trim().toLowerCase();
+      if (!email || seen.has(email)) return false;
+      seen.add(email);
+      return true;
+    });
+  };
+
+  const individualizedTargets = individualizeBcc
+    ? dedupeRequestedRecipients([
+        ...requestedToRecipients,
+        ...requestedBccRecipients,
+      ])
+    : requestedToRecipients;
+
   const subjectTemplate = String(payload.subject ?? "").trim();
   const bodyTemplate = String(payload.body ?? "").trim();
   const cc = parseEmailList(payload.cc);
-  const bcc = parseEmailList(payload.bcc);
+  const bcc = individualizeBcc
+    ? []
+    : parseEmailList(payload.bcc);
 
-  const invalidTo = requestedToRecipients
+  const invalidTo = individualizedTargets
     .map((item) => item.email)
     .filter((email): email is string => Boolean(email))
     .filter((email) => !isValidEmail(email));
@@ -179,9 +229,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (requestedToRecipients.length === 0) {
+  if (individualizedTargets.length === 0) {
     return NextResponse.json(
-      { error: "받는 사람을 한 명 이상 추가해주세요." },
+      {
+        error:
+          "받는 사람 또는 숨은참조 수신자를 한 명 이상 추가해주세요.",
+      },
       { status: 400 }
     );
   }
@@ -245,7 +298,7 @@ export async function POST(request: NextRequest) {
   const requestedCampaignInfluencerIds = Array.from(
     new Set([
       ...campaignInfluencerIds,
-      ...requestedToRecipients
+      ...individualizedTargets
         .map((item) => item.campaignInfluencerId)
         .filter((value): value is string => Boolean(value)),
     ])
@@ -315,64 +368,87 @@ export async function POST(request: NextRequest) {
   }
 
   if (mode === "preview") {
-    const previewTarget = requestedToRecipients[0];
+    const previews = individualizedTargets
+      .map((previewTarget) => {
+        if (!previewTarget?.email) {
+          return null;
+        }
 
-    if (!previewTarget?.email) {
+        const linkedMember = previewTarget.campaignInfluencerId
+          ? memberMap.get(previewTarget.campaignInfluencerId)
+          : null;
+
+        const linkedInfluencer = linkedMember
+          ? getInfluencer(linkedMember)
+          : null;
+
+        const displayName =
+          linkedInfluencer?.name?.trim() ||
+          previewTarget.name?.trim() ||
+          "담당자";
+
+        const variables = {
+          인플루언서명: displayName,
+          브랜드: campaign.brand ?? "",
+          제품: campaign.product ?? "",
+          캠페인명: campaign.name ?? "",
+          name: displayName,
+          brand: campaign.brand ?? "",
+          product: campaign.product ?? "",
+          campaign: campaign.name ?? "",
+        };
+
+        const previewSubject = replaceTemplate(
+          subjectTemplate,
+          variables
+        );
+        const previewBody = replaceTemplate(
+          bodyTemplate,
+          variables
+        );
+
+        return {
+          recipientName:
+            previewTarget.name ??
+            linkedInfluencer?.name ??
+            null,
+          recipientEmail: previewTarget.email,
+          cc,
+          bcc,
+          subject: previewSubject,
+          body: previewBody,
+          html: buildEmailHtml({
+            body: previewBody,
+            signatureHtml,
+          }),
+        };
+      })
+      .filter(
+        (
+          item
+        ): item is {
+          recipientName: string | null;
+          recipientEmail: string;
+          cc: string[];
+          bcc: string[];
+          subject: string;
+          body: string;
+          html: string;
+        } => Boolean(item?.recipientEmail)
+      );
+
+    if (previews.length === 0) {
       return NextResponse.json(
         { error: "미리보기할 받는 사람을 찾을 수 없습니다." },
         { status: 404 }
       );
     }
 
-    const linkedMember = previewTarget.campaignInfluencerId
-      ? memberMap.get(previewTarget.campaignInfluencerId)
-      : null;
-
-    const linkedInfluencer = linkedMember
-      ? getInfluencer(linkedMember)
-      : null;
-
-    const displayName =
-      linkedInfluencer?.name?.trim() ||
-      previewTarget.name?.trim() ||
-      "담당자";
-
-    const variables = {
-      인플루언서명: displayName,
-      브랜드: campaign.brand ?? "",
-      제품: campaign.product ?? "",
-      캠페인명: campaign.name ?? "",
-      name: displayName,
-      brand: campaign.brand ?? "",
-      product: campaign.product ?? "",
-      campaign: campaign.name ?? "",
-    };
-
-    const previewSubject = replaceTemplate(
-      subjectTemplate,
-      variables
-    );
-    const previewBody = replaceTemplate(
-      bodyTemplate,
-      variables
-    );
-
     return NextResponse.json({
       success: true,
       sender: connection.google_email,
-      recipientName:
-        previewTarget.name ??
-        linkedInfluencer?.name ??
-        null,
-      recipientEmail: previewTarget.email,
-      cc,
-      bcc,
-      subject: previewSubject,
-      body: previewBody,
-      html: buildEmailHtml({
-        body: previewBody,
-        signatureHtml,
-      }),
+      individualizeBcc,
+      previews,
       hasSignature: Boolean(signatureHtml.trim()),
     });
   }
@@ -386,7 +462,7 @@ export async function POST(request: NextRequest) {
     error?: string | null;
   }> = [];
 
-  for (const target of requestedToRecipients) {
+  for (const target of individualizedTargets) {
     const recipientEmail = target.email?.trim() || null;
 
     if (!recipientEmail) {
@@ -518,6 +594,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     success: true,
     sender: connection.google_email,
+    individualizeBcc,
     total: results.length,
     sent,
     failed,
