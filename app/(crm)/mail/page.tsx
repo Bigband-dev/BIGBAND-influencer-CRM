@@ -1,21 +1,6 @@
-import { redirect } from "next/navigation";
-
-import { createClient } from "@/lib/supabase/server";
 import GeneralBulkMail from "@/components/general-bulk-mail";
 
-export const instant = false;
-
-export default async function MailPage() {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
+export default function MailPage() {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <div className="mx-auto max-w-6xl px-6 py-8">
