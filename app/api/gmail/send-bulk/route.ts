@@ -85,8 +85,6 @@ export async function POST(request: NextRequest) {
     campaignId?: string;
     campaignInfluencerIds?: string[];
     toRecipients?: RequestedToRecipient[];
-    bccRecipients?: RequestedToRecipient[];
-    individualizeBcc?: boolean;
     subject?: string;
     body?: string;
     cc?: string | string[];
@@ -137,58 +135,12 @@ export async function POST(request: NextRequest) {
           .filter((item) => Boolean(item.email))
       : [];
 
-  const requestedBccRecipients: RequestedToRecipient[] =
-    Array.isArray(payload.bccRecipients)
-      ? payload.bccRecipients
-          .map((item) => ({
-            name:
-              item?.name == null
-                ? null
-                : String(item.name).trim() || null,
-            email:
-              item?.email == null
-                ? null
-                : String(item.email).trim() || null,
-            campaignInfluencerId:
-              item?.campaignInfluencerId == null
-                ? null
-                : String(item.campaignInfluencerId).trim() || null,
-            influencerId:
-              item?.influencerId == null
-                ? null
-                : String(item.influencerId).trim() || null,
-          }))
-          .filter((item) => Boolean(item.email))
-      : [];
-
-  const individualizeBcc = payload.individualizeBcc === true;
-
-  const dedupeRequestedRecipients = (
-    items: RequestedToRecipient[]
-  ) => {
-    const seen = new Set<string>();
-
-    return items.filter((item) => {
-      const email = String(item.email ?? "").trim().toLowerCase();
-      if (!email || seen.has(email)) return false;
-      seen.add(email);
-      return true;
-    });
-  };
-
-  const individualizedTargets = individualizeBcc
-    ? dedupeRequestedRecipients([
-        ...requestedToRecipients,
-        ...requestedBccRecipients,
-      ])
-    : requestedToRecipients;
+  const individualizedTargets = requestedToRecipients;
 
   const subjectTemplate = String(payload.subject ?? "").trim();
   const bodyTemplate = String(payload.body ?? "").trim();
   const cc = parseEmailList(payload.cc);
-  const bcc = individualizeBcc
-    ? []
-    : parseEmailList(payload.bcc);
+  const bcc = parseEmailList(payload.bcc);
 
   const invalidTo = individualizedTargets
     .map((item) => item.email)
@@ -447,7 +399,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       sender: connection.google_email,
-      individualizeBcc,
       previews,
       hasSignature: Boolean(signatureHtml.trim()),
     });
@@ -594,7 +545,6 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     success: true,
     sender: connection.google_email,
-    individualizeBcc,
     total: results.length,
     sent,
     failed,

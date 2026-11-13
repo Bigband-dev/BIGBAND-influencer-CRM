@@ -1,17 +1,16 @@
-PREVIEW CAROUSEL HOTFIX V2
+BCC 개별 발송 기능 제거 버전
 
-수정 내용:
-1. requestPreview()에서 아래 잘못된 검사를 완전히 제거
-   - "먼저 메일 미리보기를 생성해주세요."
-   - "전체 미리보기를 확인해주세요."
+현재 동작
+- 받는 사람(To): 항상 각 주소별 개별 발송
+- 참조(CC): 각 개별 메일에 공통으로 포함
+- 숨은참조(BCC): 일반 Gmail BCC 헤더로만 포함
+- 수신자별 미리보기 캐러셀: To 대상 기준으로 유지
+- {{인플루언서명}}, {{name}} 개인화: To 대상 기준
+- BCC 개별 발송 토글/설명/백엔드 분기 모두 제거
 
-2. 위 두 검사는 handleSend()에만 배치
-   - 미리보기를 아직 생성하지 않았으면 발송 차단
-   - 전체 수신자 미리보기를 확인하지 않았으면 발송 차단
+교체 파일
+- components/campaign-email-modal.tsx
+- app/api/gmail/send-bulk/route.ts
+- lib/google/gmail.ts
 
-3. 최초 미리보기 생성 시 첫 번째 수신자는 자동으로 '확인 완료' 처리
-
-교체 파일:
-components/campaign-email-modal.tsx
-
-백엔드 변경 없음.
+DB 수정 없음.

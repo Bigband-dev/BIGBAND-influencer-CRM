@@ -73,7 +73,6 @@ type PreviewResult = {
   sender: string;
   previews: PreviewItem[];
   hasSignature: boolean;
-  individualizeBcc?: boolean;
 };
 
 type GoogleContactSuggestion = {
@@ -500,7 +499,6 @@ export default function CampaignEmailModal({
   const [toRecipients, setToRecipients] = useState<RecipientChip[]>([]);
   const [ccRecipients, setCcRecipients] = useState<RecipientChip[]>([]);
   const [bccRecipients, setBccRecipients] = useState<RecipientChip[]>([]);
-  const [individualizeBcc, setIndividualizeBcc] = useState(false);
   const [showCopyFields, setShowCopyFields] = useState(true);
   const [contactsNeedReconnect, setContactsNeedReconnect] = useState(false);
   const [sending, setSending] = useState(false);
@@ -518,15 +516,9 @@ export default function CampaignEmailModal({
     [recipients]
   );
 
-  const individualizedRecipients = useMemo(
-    () =>
-      individualizeBcc
-        ? addRecipients(toRecipients, bccRecipients)
-        : toRecipients,
-    [toRecipients, bccRecipients, individualizeBcc]
-  );
+  const individualizedRecipients = toRecipients;
 
-  const mailableCount = individualizedRecipients.length;
+  const mailableCount = toRecipients.length;
   const missingEmailCount = recipients.length - selectedMailableCount;
 
   const previewItems = preview?.previews ?? [];
@@ -560,7 +552,6 @@ export default function CampaignEmailModal({
   useEffect(() => {
     if (!open) return;
     setToRecipients(selectedInfluencerRecipients);
-    setIndividualizeBcc(false);
     setResult(null);
     setPreview(null);
     setPreviewIndex(0);
@@ -637,13 +628,6 @@ export default function CampaignEmailModal({
           campaignInfluencerId: item.campaignInfluencerId ?? null,
           influencerId: item.influencerId ?? null,
         })),
-        bccRecipients: bccRecipients.map((item) => ({
-          name: item.name,
-          email: item.email,
-          campaignInfluencerId: item.campaignInfluencerId ?? null,
-          influencerId: item.influencerId ?? null,
-        })),
-        individualizeBcc,
         subject,
         body,
         cc: ccRecipients.map((item) => item.email),
@@ -798,9 +782,7 @@ export default function CampaignEmailModal({
     }
 
     const confirmed = window.confirm(
-      individualizeBcc
-        ? `받는 사람 + 숨은참조 총 ${individualizedRecipients.length}명에게 각각 개인화된 메일을 발송하시겠습니까?\n\n참조(CC)는 각 메일에 공통으로 포함됩니다.`
-        : `받는 사람 ${toRecipients.length}명에게 각각 개별 메일을 발송하시겠습니까?`
+      `받는 사람 ${toRecipients.length}명에게 각각 개별 메일을 발송하시겠습니까?`
     );
 
     if (!confirmed) return;
@@ -931,7 +913,7 @@ export default function CampaignEmailModal({
 
               <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4">
                 <RecipientChipField
-                  label="받는 사람"
+                  label="받는 사람 (To)"
                   description="현재 선택한 인플루언서가 기본으로 들어갑니다. 팀원/외부 이메일을 검색하거나 직접 입력할 수 있으며, 각 주소로 개별 메일이 발송됩니다."
                   recipients={toRecipients}
                   setRecipients={(next) => {
@@ -993,7 +975,7 @@ export default function CampaignEmailModal({
                 {showCopyFields && (
                   <div className="mt-4 grid gap-5">
                     <RecipientChipField
-                      label="참조"
+                      label="참조 (CC)"
                       description="회사 디렉터리나 개인 Google 연락처를 검색하거나 이메일을 직접 입력할 수 있습니다."
                       recipients={ccRecipients}
                       setRecipients={(next) => {
@@ -1010,7 +992,7 @@ export default function CampaignEmailModal({
                     />
 
                     <RecipientChipField
-                      label="숨은참조"
+                      label="숨은참조 (BCC)"
                       description="추가된 주소는 다른 수신자에게 표시되지 않습니다."
                       recipients={bccRecipients}
                       setRecipients={(next) => {
@@ -1026,46 +1008,7 @@ export default function CampaignEmailModal({
                       }
                     />
 
-                    <div className="rounded-xl border border-slate-200 bg-white p-4">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-800">
-                            숨은참조 개별 발송
-                          </p>
-                          <p className="mt-1 text-xs leading-5 text-slate-500">
-                            받는 사람과 숨은참조를 모두 개별 발송합니다.
-                          </p>
-                        </div>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIndividualizeBcc((current) => !current);
-                            setPreview(null);
-                            setPreviewIndex(0);
-                            setReviewedPreviewEmails(new Set());
-                          }}
-                          disabled={sending}
-                          className={
-                            individualizeBcc
-                              ? "shrink-0 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
-                              : "shrink-0 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                          }
-                        >
-                          {individualizeBcc ? "켜짐" : "꺼짐"}
-                        </button>
-                      </div>
-
-                      {individualizeBcc && (
-                        <div className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800">
-                          현재 개별 발송 대상: {individualizedRecipients.length}명
-                          · To {toRecipients.length}명
-                          · BCC {bccRecipients.length}명
-                          <br />
-                          같은 이메일이 To와 BCC에 모두 있으면 한 번만 발송됩니다.
-                        </div>
-                      )}
-                    </div>
                   </div>
                 )}
               </div>
