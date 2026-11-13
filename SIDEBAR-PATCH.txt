@@ -1,0 +1,32 @@
+사이드바 메뉴 추가
+
+현재 프로젝트의 components/sidebar.tsx 안에서
+캠페인/인플루언서 메뉴를 렌더링하는 Link 목록에 아래 Link를 추가하세요.
+
+import Link from "next/link"; 는 기존에 있다면 추가하지 않아도 됩니다.
+
+예시:
+
+<Link
+  href="/mail"
+  className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+>
+  <span aria-hidden="true">✉</span>
+  메일 보내기
+</Link>
+
+추천 위치:
+- 캠페인 메뉴 바로 아래
+또는
+- 인플루언서 / 캠페인과 같은 1차 메뉴 영역
+
+최종 사이드바 예시:
+
+인플루언서
+캠페인
+메일 보내기   ← 추가
+서칭
+계정
+
+현재 sidebar.tsx 최신 원본이 이 대화에 첨부되지 않아
+전체 파일을 임의로 덮어쓰지 않고 메뉴 Link 패치만 제공합니다.

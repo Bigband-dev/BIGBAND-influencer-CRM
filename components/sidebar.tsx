@@ -38,6 +38,9 @@ export default function Sidebar({
   const isCampaigns =
     pathname.startsWith("/campaigns");
 
+  const isMail =
+    pathname.startsWith("/mail");
+
   const isSearch =
     pathname.startsWith("/search");
 
@@ -86,6 +89,13 @@ export default function Sidebar({
             className={customMenuClass(isCampaigns)}
           >
             캠페인
+          </Link>
+
+          <Link
+            href="/mail"
+            className={customMenuClass(isMail)}
+          >
+            메일 보내기
           </Link>
 
           <Link
