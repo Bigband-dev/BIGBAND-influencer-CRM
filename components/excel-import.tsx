@@ -8,6 +8,75 @@ import { formatPriceMan } from "@/lib/format-number";
 
 type RawRow = Record<string, unknown>;
 
+const TEMPLATE_META = {
+  sheetName: "__sheetName",
+  platform: "__platform",
+  excelRow: "__excelRow",
+} as const;
+
+function platformFromSheetName(
+  sheetName: string
+): InfluencerPlatform | null {
+  const normalized = sheetName
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+
+  if (
+    normalized.startsWith("ig") ||
+    normalized.includes("인스타") ||
+    normalized.includes("instagram")
+  ) {
+    return "instagram";
+  }
+
+  if (
+    normalized.startsWith("yt") ||
+    normalized.includes("유튜브") ||
+    normalized.includes("youtube")
+  ) {
+    return "youtube";
+  }
+
+  if (
+    normalized.startsWith("nb") ||
+    normalized.includes("네이버블로그") ||
+    normalized.includes("블로그") ||
+    normalized.includes("naverblog")
+  ) {
+    return "naver_blog";
+  }
+
+  if (
+    normalized.startsWith("tt") ||
+    normalized.includes("틱톡") ||
+    normalized.includes("tiktok")
+  ) {
+    return "tiktok";
+  }
+
+  return null;
+}
+
+function isTemplateExampleRow(row: RawRow) {
+  return normalizeText(row["#"]).toLowerCase() === "예시";
+}
+
+function hasMeaningfulTemplateData(row: RawRow) {
+  return Object.entries(row).some(([key, value]) => {
+    if (
+      key === "#" ||
+      key === TEMPLATE_META.sheetName ||
+      key === TEMPLATE_META.platform ||
+      key === TEMPLATE_META.excelRow
+    ) {
+      return false;
+    }
+
+    return normalizeText(value) !== "";
+  });
+}
+
 type FieldKey =
   | "campaign_brand"
   | "campaign_product"
@@ -16,6 +85,7 @@ type FieldKey =
   | "channel_handle"
   | "channel_name"
   | "category"
+  | "category_secondary"
   | "content_format"
   | "channel_url"
   | "content_reference"
@@ -54,6 +124,7 @@ type ImportRow = {
   channel_handle: string;
   channel_name: string | null;
   category: string | null;
+  category_secondary: string | null;
   content_format: string | null;
   channel_url: string | null;
   content_reference: string | null;
@@ -78,6 +149,7 @@ const EMPTY_MAPPING: Mapping = {
   channel_handle: "",
   channel_name: "",
   category: "",
+  category_secondary: "",
   content_format: "",
   channel_url: "",
   content_reference: "",
@@ -102,6 +174,7 @@ const FIELD_LABELS: Record<FieldKey, string> = {
   channel_handle: "아이디",
   channel_name: "계정명",
   category: "카테고리",
+  category_secondary: "2번째 카테고리",
   content_format: "콘텐츠 포맷",
   channel_url: "계정 URL",
   content_reference: "콘텐츠 레퍼런스",
@@ -140,7 +213,14 @@ const FIELD_ALIASES: Record<FieldKey, string[]> = {
     "계정명", "channel_name", "channel name", "채널명", "블로그명", "유튜브채널명",
   ],
   category: [
-    "카테고리", "category", "분류",
+    "카테고리", "category", "분류", "1차카테고리", "1차 카테고리", "첫번째카테고리", "첫 번째 카테고리",
+  ],
+  category_secondary: [
+    "카테고리2 (없으면X)", "카테고리2(없으면X)", "카테고리 2 (없으면X)", "카테고리 2(없으면X)",
+    "카테고리2", "카테고리 2",
+    "2번째카테고리", "2번째 카테고리", "두번째카테고리", "두 번째 카테고리",
+    "2차카테고리", "2차 카테고리", "보조카테고리", "보조 카테고리",
+    "category2", "category 2", "secondarycategory", "secondary category",
   ],
   content_format: [
     "콘텐츠포맷", "콘텐츠 포맷", "contentformat", "content format", "format", "광고포맷", "광고 포맷",
@@ -208,31 +288,63 @@ function normalizeHeader(value: string) {
 function guessMapping(headers: string[]) {
   const next: Mapping = { ...EMPTY_MAPPING };
 
-  for (const field of Object.keys(FIELD_ALIASES) as FieldKey[]) {
+  const normalizedHeaders = headers.map((header) => ({
+    header,
+    normalized: normalizeHeader(header),
+  }));
+
+  const assignField = (field: FieldKey) => {
     const aliases = FIELD_ALIASES[field].map(normalizeHeader);
 
-    const exact = headers.find((header) =>
-      aliases.includes(normalizeHeader(header))
+    const candidates = normalizedHeaders.filter(({ normalized }) => {
+      if (field === "category") {
+        // "카테고리2 (없으면X)" 같은 2차 카테고리 헤더를
+        // 1차 카테고리로 잘못 잡지 않도록 제외합니다.
+        if (
+          /카테고리2/.test(normalized) ||
+          /2차카테고리/.test(normalized) ||
+          /2번째카테고리/.test(normalized) ||
+          /두번째카테고리/.test(normalized) ||
+          /보조카테고리/.test(normalized) ||
+          /category2/.test(normalized) ||
+          /secondarycategory/.test(normalized)
+        ) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    const exact = candidates.find(({ normalized }) =>
+      aliases.includes(normalized)
     );
 
     if (exact) {
-      next[field] = exact;
-      continue;
+      next[field] = exact.header;
+      return;
     }
 
-    const partial = headers.find((header) => {
-      const normalizedHeader = normalizeHeader(header);
-
-      return aliases.some(
+    const partial = candidates.find(({ normalized }) =>
+      aliases.some(
         (alias) =>
-          normalizedHeader.includes(alias) ||
-          alias.includes(normalizedHeader)
-      );
-    });
+          normalized.includes(alias) ||
+          alias.includes(normalized)
+      )
+    );
 
     if (partial) {
-      next[field] = partial;
+      next[field] = partial.header;
     }
+  };
+
+  // 2차 카테고리를 먼저 잡아야 "카테고리2 (없으면X)"가
+  // 1차 카테고리의 부분 일치로 선점되지 않습니다.
+  assignField("category_secondary");
+
+  for (const field of Object.keys(FIELD_ALIASES) as FieldKey[]) {
+    if (field === "category_secondary") continue;
+    assignField(field);
   }
 
   return next;
@@ -628,11 +740,17 @@ function analyzeImportRowValidity(
 
   const handleRaw = normalizeText(handleSource);
 
+  const sheetPlatform =
+    normalizePlatformValue(
+      row[TEMPLATE_META.platform]
+    );
+
   const explicitPlatform = mapping.platform
     ? normalizePlatformValue(row[mapping.platform])
     : null;
 
   const platform =
+    sheetPlatform ??
     explicitPlatform ??
     detectPlatformFromUrl(urlRaw) ??
     detectPlatformFromMappedHeader(
@@ -859,38 +977,107 @@ export default function ExcelImport() {
         type: "array",
       });
 
-      const firstSheetName = workbook.SheetNames[0];
-      const firstSheet =
-        workbook.Sheets[firstSheetName];
+      const allRows: RawRow[] = [];
+      const allHeaders = new Set<string>();
+      const recognizedSheets: string[] = [];
+      const skippedSheets: string[] = [];
+      let skippedExampleRows = 0;
+      let skippedEmptyTemplateRows = 0;
 
-      const parsedRows =
-        XLSX.utils.sheet_to_json<RawRow>(
-          firstSheet,
-          {
-            defval: "",
+      for (const sheetName of workbook.SheetNames) {
+        const platform = platformFromSheetName(sheetName);
+
+        if (!platform) {
+          skippedSheets.push(sheetName);
+          continue;
+        }
+
+        const sheet = workbook.Sheets[sheetName];
+
+        if (!sheet) continue;
+
+        const sheetRows =
+          XLSX.utils.sheet_to_json<RawRow>(
+            sheet,
+            {
+              defval: "",
+            }
+          );
+
+        recognizedSheets.push(sheetName);
+
+        for (const row of sheetRows) {
+          for (const header of Object.keys(row)) {
+            if (header !== "#") {
+              allHeaders.add(header);
+            }
           }
-        );
+        }
 
-      if (parsedRows.length === 0) {
+        sheetRows.forEach((row, index) => {
+          // 1행은 헤더이므로 sheet_to_json 결과의 index 0은 Excel 2행입니다.
+          const excelRow = index + 2;
+
+          if (isTemplateExampleRow(row)) {
+            skippedExampleRows += 1;
+            return;
+          }
+
+          // 템플릿에는 # 번호만 채워진 빈 행이 다수 있으므로 실제 업로드에서 제외합니다.
+          if (!hasMeaningfulTemplateData(row)) {
+            skippedEmptyTemplateRows += 1;
+            return;
+          }
+
+          allRows.push({
+            ...row,
+            [TEMPLATE_META.sheetName]: sheetName,
+            [TEMPLATE_META.platform]: platform,
+            [TEMPLATE_META.excelRow]: excelRow,
+          });
+        });
+      }
+
+      if (recognizedSheets.length === 0) {
         setMessage(
-          "Excel 파일에서 데이터를 찾지 못했습니다."
+          "읽을 수 있는 플랫폼 시트를 찾지 못했습니다. 시트명을 IG/YT/NB 인플루언서 또는 Instagram/YouTube/블로그 형식으로 확인해주세요."
         );
         return;
       }
 
-      const detectedHeaders = Object.keys(
-        parsedRows[0]
-      );
+      if (allRows.length === 0) {
+        setRawRows([]);
+        setHeaders(Array.from(allHeaders));
+        setMapping(
+          guessMapping(Array.from(allHeaders))
+        );
+
+        setMessage(
+          `플랫폼 시트 ${recognizedSheets.length}개를 확인했지만 실제 데이터 행이 없습니다. 예시 행 ${skippedExampleRows.toLocaleString()}개와 빈 템플릿 행 ${skippedEmptyTemplateRows.toLocaleString()}개는 제외했습니다.`
+        );
+        return;
+      }
+
+      const detectedHeaders =
+        Array.from(allHeaders);
 
       const autoMapping =
         guessMapping(detectedHeaders);
 
-      setRawRows(parsedRows);
+      // 플랫폼은 시트명으로 자동 판별하므로 별도의 "채널" 컬럼 매핑이 없어도 됩니다.
+      autoMapping.platform = "";
+
+      setRawRows(allRows);
       setHeaders(detectedHeaders);
       setMapping(autoMapping);
 
+      const skippedSheetMessage =
+        skippedSheets.length > 0
+          ? ` 인식하지 못한 시트: ${skippedSheets.join(", ")}.`
+          : "";
+
       setMessage(
-        `${parsedRows.length.toLocaleString()}개 행을 읽었습니다. 컬럼 매핑을 확인해주세요.`
+        `${recognizedSheets.join(", ")} 시트에서 실제 데이터 ${allRows.length.toLocaleString()}개 행을 읽었습니다. 예시 행 ${skippedExampleRows.toLocaleString()}개와 빈 템플릿 행 ${skippedEmptyTemplateRows.toLocaleString()}개는 제외했습니다.${skippedSheetMessage}`
       );
     } catch (error) {
       console.error(error);
@@ -906,6 +1093,11 @@ export default function ExcelImport() {
 
     return rawRows
       .map((row): ImportRow => {
+        const sheetPlatform =
+          normalizePlatformValue(
+            row[TEMPLATE_META.platform]
+          );
+
         const explicitPlatform = mapping.platform
           ? normalizePlatformValue(row[mapping.platform])
           : null;
@@ -915,6 +1107,7 @@ export default function ExcelImport() {
           : "";
 
         const platform =
+          sheetPlatform ??
           explicitPlatform ??
           detectPlatformFromUrl(rawUrl) ??
           detectPlatformFromMappedHeader(
@@ -960,6 +1153,10 @@ export default function ExcelImport() {
 
           category: mapping.category
             ? normalizeText(row[mapping.category]) || null
+            : null,
+
+          category_secondary: mapping.category_secondary
+            ? normalizeText(row[mapping.category_secondary]) || null
             : null,
 
           content_format: mapping.content_format
@@ -1040,7 +1237,7 @@ export default function ExcelImport() {
         analyzeImportRowValidity(
           row,
           mapping,
-          index + 2
+          Number(row[TEMPLATE_META.excelRow]) || index + 2
         )
       )
       .filter(
@@ -1113,10 +1310,26 @@ export default function ExcelImport() {
 
       batchId = batch.id;
 
-      // Excel 양식에는 실명 컬럼이 없으므로
-      // 플랫폼 + 아이디(핸들)를 채널 식별키로 사용합니다.
-      const personKey = (row: ImportRow) =>
-        `channel::${row.platform}::${row.channel_handle.toLowerCase()}`;
+      /*
+       * 멀티 시트 양식에서 동일 인물이 IG/YT/NB에 동시에 있을 수 있습니다.
+       * 계정명 + 컨택포인트가 둘 다 동일하면 같은 인플루언서로 묶고,
+       * 그렇지 않으면 플랫폼 + 핸들을 사용해 안전하게 별도 인플루언서로 처리합니다.
+       *
+       * 이름만 같은 경우는 동명이인/브랜드 계정 오병합 위험이 있어 합치지 않습니다.
+       */
+      const personKey = (row: ImportRow) => {
+        const normalizedName =
+          row.channel_name?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
+
+        const normalizedContact =
+          row.contact_point?.trim().toLowerCase().replace(/\s+/g, "") ?? "";
+
+        if (normalizedName && normalizedContact) {
+          return `person::${normalizedName}::${normalizedContact}`;
+        }
+
+        return `channel::${row.platform}::${row.channel_handle.toLowerCase()}`;
+      };
 
       const personRowsMap = new Map<string, ImportRow[]>();
 
@@ -1264,6 +1477,35 @@ export default function ExcelImport() {
           beforeInfluencerMap.set(influencerId, null);
         }
 
+        const importedCategories = Array.from(
+          new Set(
+            rows
+              .flatMap((row) => [
+                row.category,
+                row.category_secondary,
+              ])
+              .map((value) => value?.trim() || "")
+              .filter(Boolean)
+          )
+        );
+
+        const existingCategories = Array.isArray(
+          existing?.categories
+        )
+          ? existing.categories
+              .map((value: unknown) =>
+                typeof value === "string" ? value.trim() : ""
+              )
+              .filter(Boolean)
+          : existing?.category
+            ? [String(existing.category).trim()].filter(Boolean)
+            : [];
+
+        const categories =
+          importedCategories.length > 0
+            ? importedCategories
+            : existingCategories;
+
         const payload = {
           id: influencerId,
           name:
@@ -1286,9 +1528,10 @@ export default function ExcelImport() {
             existing?.phone ??
             null,
           category:
-            rows.find((row) => row.category)?.category ??
+            categories[0] ??
             existing?.category ??
             null,
+          categories,
           memo: buildImportMemo(
             existing?.memo ?? null,
             rows.find((row) => row.contact_point)
@@ -2469,12 +2712,22 @@ export default function ExcelImport() {
           첫 번째 시트를 읽고 컬럼을 자동으로 인식합니다.
         </p>
 
-        <input
-          type="file"
-          accept=".xlsx,.xls"
-          onChange={handleFile}
-          className="mt-5 block w-full text-sm"
-        />
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <input
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={handleFile}
+            className="block w-full text-sm sm:max-w-xl"
+          />
+
+          <a
+            href="/templates/influencer-standard-template.xlsx"
+            download="인플루언서 표준 엑셀 양식.xlsx"
+            className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            표준 양식 다운로드
+          </a>
+        </div>
 
         {fileName && (
           <p className="mt-3 text-sm text-slate-600">
@@ -2492,15 +2745,17 @@ export default function ExcelImport() {
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
-                현재 양식의 광고주/제품/캠페인/채널/아이디/계정명/카테고리/콘텐츠 포맷/URL/레퍼런스/지표/컨택포인트/클린 단가/비고 컬럼을 기준으로 자동 매핑합니다.
+                IG/YT/NB 각 시트를 모두 읽고 시트명으로 플랫폼을 자동 구분하므로 플랫폼 컬럼은 따로 매핑하지 않습니다. 광고주/제품/캠페인/아이디/계정명/카테고리/카테고리2 (없으면X)/콘텐츠 포맷/URL/레퍼런스/지표/컨택포인트/플랫폼별 클린 단가/비고 컬럼을 자동 매핑합니다. 2행의 예시와 번호만 있는 빈 템플릿 행은 자동 제외합니다.
               </p>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               {(
-                Object.keys(
+                (Object.keys(
                   FIELD_LABELS
-                ) as FieldKey[]
+                ) as FieldKey[]).filter(
+                  (field) => field !== "platform"
+                )
               ).map((field) => (
                 <div
                   key={field}
@@ -2511,7 +2766,9 @@ export default function ExcelImport() {
                     {(field === "platform" ||
                       field === "channel_handle") && (
                       <span className="ml-1 text-slate-400">
-                        선택
+                        {field === "platform"
+                          ? "시트명 자동"
+                          : "선택"}
                       </span>
                     )}
                   </label>
@@ -2716,7 +2973,7 @@ export default function ExcelImport() {
             )}
 
             <div className="max-h-[500px] overflow-auto">
-              <table className="w-full min-w-[1400px] text-sm">
+              <table className="w-full min-w-[1520px] text-sm">
                 <thead className="sticky top-0 bg-slate-50">
                   <tr>
                     <th className="px-4 py-3 text-left">광고주</th>
@@ -2724,6 +2981,7 @@ export default function ExcelImport() {
                     <th className="px-4 py-3 text-left">채널</th>
                     <th className="px-4 py-3 text-left">계정명</th>
                     <th className="px-4 py-3 text-left">카테고리</th>
+                    <th className="px-4 py-3 text-left">2번째 카테고리</th>
                     <th className="px-4 py-3 text-right">팔로워</th>
                     <th className="px-4 py-3 text-right">평균 조회수</th>
                     <th className="px-4 py-3 text-left">콘텐츠 포맷</th>
@@ -2756,6 +3014,9 @@ export default function ExcelImport() {
                         </td>
                         <td className="px-4 py-3">
                           {row.category || "-"}
+                        </td>
+                        <td className="px-4 py-3">
+                          {row.category_secondary || "-"}
                         </td>
                         <td className="px-4 py-3 text-right">
                           {row.followers?.toLocaleString() || "-"}

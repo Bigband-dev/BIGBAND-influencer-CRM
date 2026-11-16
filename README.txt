@@ -1,20 +1,23 @@
-MAIL PRERENDER BUILD FIX
+멀티 시트 엑셀 업로드 수정본
 
-문제:
-- /mail/page.tsx 안에서 Supabase auth.getUser()를 직접 호출하면서
-  cacheComponents / prerender 과정에서 NEXT_PRERENDER_INTERRUPTED가 발생했습니다.
-- export const instant = false 만으로는 Vercel build의 prerender 경로를 완전히 피하지 못했습니다.
+수정 사항
+1. '카테고리2 (없으면X)'를 2번째 카테고리로 우선 정확히 매칭
+2. 1차 카테고리 자동 매핑에서 카테고리2/2차/보조 카테고리 헤더 제외
+3. 업로드 화면의 플랫폼 매핑 항목 제거
+4. 플랫폼은 기존처럼 시트명(IG/YT/NB)에서 자동 판별
 
-수정:
-- /mail/page.tsx에서 아래를 모두 제거:
-  * createClient import
-  * supabase.auth.getUser()
-  * redirect("/login")
-  * export const instant = false
-- /mail 페이지는 GeneralBulkMail UI만 렌더링하는 정적 route shell로 변경
-- 실제 Gmail API route에서는 기존처럼 서버에서 사용자 인증을 검증하므로
-  메일 발송 보안은 유지됩니다.
-- (crm) 레이아웃의 기존 로그인 보호 구조는 그대로 사용합니다.
+교체 파일
+- components/excel-import.tsx
 
-교체 파일:
-app/(crm)/mail/page.tsx
+
+표준 엑셀 양식 다운로드 기능
+- 엑셀 업로드 화면의 파일 선택 영역에 '표준 양식 다운로드' 버튼 추가
+- 버튼 클릭 시 아래 정적 파일 다운로드:
+  /templates/influencer-standard-template.xlsx
+- 실제 제공 파일은 사용자가 업로드한 '인플루언서 표준 엑셀 양식(1).xlsx'를 그대로 사용
+
+추가/교체 파일
+- components/excel-import.tsx
+- public/templates/influencer-standard-template.xlsx
+
+별도 API나 DB 변경 없음.
