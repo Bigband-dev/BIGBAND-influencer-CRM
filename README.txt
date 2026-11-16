@@ -21,3 +21,10 @@
 - public/templates/influencer-standard-template.xlsx
 
 별도 API나 DB 변경 없음.
+
+
+TypeScript build hotfix
+- 플랫폼 매핑 항목을 UI 목록에서 제거한 뒤 남아 있던
+  field === "platform" 조건을 제거했습니다.
+- channel_handle의 '선택' 표시만 유지합니다.
+- TS2367 빌드 오류 해결용 수정입니다.

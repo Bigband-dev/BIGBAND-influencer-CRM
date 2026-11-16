@@ -2763,12 +2763,9 @@ export default function ExcelImport() {
                 >
                   <label className="text-sm font-medium text-slate-700">
                     {FIELD_LABELS[field]}
-                    {(field === "platform" ||
-                      field === "channel_handle") && (
+                    {field === "channel_handle" && (
                       <span className="ml-1 text-slate-400">
-                        {field === "platform"
-                          ? "시트명 자동"
-                          : "선택"}
+                        선택
                       </span>
                     )}
                   </label>
