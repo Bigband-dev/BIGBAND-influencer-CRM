@@ -422,27 +422,35 @@ export async function POST(
     }
 
     const body =
-      await request.json();
+      (await request.json()) as {
+        campaignId?: unknown;
+        campaignInfluencerIds?: unknown;
+        apifyToken?: unknown;
+      };
 
     const campaignId =
       String(
-        body?.campaignId ?? ""
+        body.campaignId ?? ""
       ).trim();
 
-    const campaignInfluencerIds =
+    const rawCampaignInfluencerIds =
+      Array.isArray(
+        body.campaignInfluencerIds
+      )
+        ? body.campaignInfluencerIds
+        : [];
+
+    const campaignInfluencerIds: string[] =
       Array.from(
-        new Set(
-          (
-            Array.isArray(
-              body?.campaignInfluencerIds
-            )
-              ? body.campaignInfluencerIds
-              : []
-          )
+        new Set<string>(
+          rawCampaignInfluencerIds
             .map((value: unknown) =>
               String(value).trim()
             )
-            .filter(Boolean)
+            .filter(
+              (value): value is string =>
+                value.length > 0
+            )
         )
       );
 

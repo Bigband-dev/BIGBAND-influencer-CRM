@@ -70,3 +70,10 @@ UI
 - influencer_channels에 Instagram 채널이 없고 legacy instagram_id만 있으면
   Instagram channel row를 자동 생성함
 - legacy influencers.followers/avg_views는 해당 Instagram 채널이 primary일 때만 동기화함
+
+
+TypeScript build hotfix
+- request.json() 결과 타입을 명시
+- campaignInfluencerIds를 string[]로 명시
+- Set<string>으로 고정
+- TS2345 / TS2322 unknown -> string 오류 수정
