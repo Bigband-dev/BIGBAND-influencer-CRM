@@ -172,7 +172,17 @@ function RecipientChipField({
 
       try {
         const response = await fetch(
-          `/api/google/contacts/search?q=${encodeURIComponent(trimmed)}`
+          "/api/google/contacts/search",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              q: trimmed,
+            }),
+          }
         );
 
         const data = await response.json();
@@ -562,9 +572,19 @@ export default function CampaignEmailModal({
   useEffect(() => {
     if (!open) return;
 
-    fetch("/api/google/contacts/search?warmup=1").catch(
-      () => undefined
-    );
+    fetch(
+      "/api/google/contacts/search",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify({
+          warmup: true,
+        }),
+      }
+    ).catch(() => undefined);
   }, [open]);
 
   if (!open) return null;

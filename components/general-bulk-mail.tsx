@@ -140,10 +140,16 @@ function RecipientField({
 
         try {
           const response = await fetch(
-            `/api/google/contacts/search?q=${encodeURIComponent(
-              trimmed
-            )}`,
+            "/api/google/contacts/search",
             {
+              method: "POST",
+              headers: {
+                "Content-Type":
+                  "application/json",
+              },
+              body: JSON.stringify({
+                q: trimmed,
+              }),
               signal: controller.signal,
             }
           );
