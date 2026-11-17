@@ -36,6 +36,30 @@ type CampaignInfluencer = {
   influencers: Influencer | Influencer[] | null;
 };
 
+type StatsRefreshItem = {
+  campaignInfluencerId: string;
+  influencerId: string;
+  name: string | null;
+  username: string | null;
+  status: "updated" | "skipped" | "failed";
+  reason?: string | null;
+  beforeFollowers?: number | null;
+  followers?: number | null;
+  avgViews?: number | null;
+  adAvgViews?: number | null;
+  adPostsSampled?: number;
+};
+
+type StatsRefreshResult = {
+  ok: boolean;
+  updated: number;
+  skipped: number;
+  failed: number;
+  results: StatsRefreshItem[];
+  message?: string;
+  code?: string;
+};
+
 const STATUS_ENTRIES = Object.entries(CAMPAIGN_INFLUENCER_STATUS);
 
 function normalizeStatusLabel(label: unknown) {
@@ -107,6 +131,9 @@ export default function CampaignInfluencerManager({
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [bulkStatus, setBulkStatus] = useState("");
   const [updatingBulkStatus, setUpdatingBulkStatus] = useState(false);
+  const [refreshingStats, setRefreshingStats] = useState(false);
+  const [statsRefreshResult, setStatsRefreshResult] =
+    useState<StatsRefreshResult | null>(null);
 
   const [pageSize, setPageSize] = useState(50);
   const [candidatePage, setCandidatePage] = useState(1);
@@ -310,6 +337,118 @@ export default function CampaignInfluencerManager({
           };
         });
     }, [campaignInfluencers, selectedCampaignIds]);
+
+  const runStatsRefresh = async (
+    apifyToken?: string
+  ): Promise<StatsRefreshResult> => {
+    const response = await fetch(
+      "/api/influencers/refresh-stats",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          campaignId,
+          campaignInfluencerIds:
+            selectedCampaignIds,
+          ...(apifyToken
+            ? { apifyToken }
+            : {}),
+        }),
+      }
+    );
+
+    const responseText = await response.text();
+
+    let data: StatsRefreshResult;
+
+    try {
+      data = JSON.parse(
+        responseText
+      ) as StatsRefreshResult;
+    } catch {
+      throw new Error(
+        `최신화 API가 JSON이 아닌 응답을 반환했습니다. HTTP ${response.status}`
+      );
+    }
+
+    if (!response.ok) {
+      const error = new Error(
+        data.message ||
+          "인플루언서 데이터 최신화에 실패했습니다."
+      ) as Error & {
+        code?: string;
+      };
+      error.code = data.code;
+      throw error;
+    }
+
+    return data;
+  };
+
+  const handleRefreshStats = async () => {
+    if (
+      selectedCampaignIds.length === 0 ||
+      refreshingStats
+    ) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `선택한 ${selectedCampaignIds.length}명의 Instagram 데이터를 Apify로 최신화합니다.\n\n팔로워 · 최근 게시물 조회수 평균 · 최근 광고성 게시물 3개 평균 조회수를 갱신합니다.\n계속할까요?`
+    );
+
+    if (!confirmed) return;
+
+    setRefreshingStats(true);
+    setStatsRefreshResult(null);
+
+    try {
+      let data: StatsRefreshResult;
+
+      try {
+        data = await runStatsRefresh();
+      } catch (error) {
+        const typedError = error as Error & {
+          code?: string;
+        };
+
+        if (
+          typedError.code !==
+          "APIFY_TOKEN_REQUIRED"
+        ) {
+          throw error;
+        }
+
+        const token = window.prompt(
+          "Vercel 환경변수 APIFY_API_TOKEN이 설정되어 있지 않습니다.\n이번 요청에 사용할 Apify API Key를 입력해주세요.\n\n입력한 키는 DB에 저장하지 않습니다."
+        );
+
+        if (!token?.trim()) {
+          return;
+        }
+
+        data = await runStatsRefresh(
+          token.trim()
+        );
+      }
+
+      setStatsRefreshResult(data);
+
+      if (data.updated > 0) {
+        router.refresh();
+      }
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? error.message
+          : "인플루언서 데이터 최신화 중 오류가 발생했습니다."
+      );
+    } finally {
+      setRefreshingStats(false);
+    }
+  };
 
   const handleBulkRemove = async () => {
     if (selectedCampaignIds.length === 0 || removing) return;
@@ -521,8 +660,27 @@ export default function CampaignInfluencerManager({
 
             <button
               type="button"
+              onClick={handleRefreshStats}
+              disabled={
+                removing ||
+                updatingBulkStatus ||
+                refreshingStats
+              }
+              className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {refreshingStats
+                ? "최신화 중..."
+                : `선택 ${selectedCampaignIds.length}명 데이터 최신화`}
+            </button>
+
+            <button
+              type="button"
               onClick={() => setEmailModalOpen(true)}
-              disabled={removing || updatingBulkStatus}
+              disabled={
+                removing ||
+                updatingBulkStatus ||
+                refreshingStats
+              }
               className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
             >
               선택 {selectedCampaignIds.length}명 메일
@@ -531,7 +689,7 @@ export default function CampaignInfluencerManager({
             <button
               type="button"
               onClick={handleBulkRemove}
-              disabled={removing || updatingBulkStatus}
+              disabled={removing || updatingBulkStatus || refreshingStats}
               className="rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {removing
@@ -758,11 +916,18 @@ export default function CampaignInfluencerManager({
             <tbody className="divide-y divide-slate-300">
               {paginatedAvailable.map((influencer) => (
                 <tr key={influencer.id} className="hover:bg-slate-50">
-                  <td className="w-12 px-4 py-3">
+                  <td
+                    className="w-16 cursor-pointer px-4 py-3 text-center hover:bg-slate-100"
+                    onClick={() => toggle(influencer.id)}
+                    aria-label={`${influencer.name || influencer.instagram_id || "인플루언서"} 선택 영역`}
+                  >
                     <input
                       type="checkbox"
                       checked={selectedIds.includes(influencer.id)}
+                      onClick={(e) => e.stopPropagation()}
                       onChange={() => toggle(influencer.id)}
+                      className="h-6 w-6 cursor-pointer accent-slate-800"
+                      aria-label={`${influencer.name || influencer.instagram_id || "인플루언서"} 선택`}
                     />
                   </td>
                   <td className="px-4 py-3 font-semibold">
@@ -802,6 +967,85 @@ export default function CampaignInfluencerManager({
           setAvailablePage
         )}
       </section>
+
+      {statsRefreshResult && (
+        <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="font-bold text-emerald-900">
+                선택 인플루언서 데이터 최신화 완료
+              </h3>
+              <p className="mt-1 text-sm text-emerald-800">
+                성공 {statsRefreshResult.updated}명 · 건너뜀{" "}
+                {statsRefreshResult.skipped}명 · 실패{" "}
+                {statsRefreshResult.failed}명
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setStatsRefreshResult(null)}
+              className="rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+            >
+              닫기
+            </button>
+          </div>
+
+          <div className="mt-4 max-h-72 overflow-y-auto rounded-lg border border-emerald-200 bg-white">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="sticky top-0 bg-emerald-50 text-emerald-900">
+                <tr>
+                  <th className="px-3 py-2 text-left">계정</th>
+                  <th className="px-3 py-2 text-right">팔로워</th>
+                  <th className="px-3 py-2 text-right">평균 조회수</th>
+                  <th className="px-3 py-2 text-right">광고 평균 조회수</th>
+                  <th className="px-3 py-2 text-center">상태</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {statsRefreshResult.results.map((item) => (
+                  <tr
+                    key={`${item.campaignInfluencerId}-${item.influencerId}`}
+                  >
+                    <td className="px-3 py-2">
+                      <div className="font-medium text-slate-900">
+                        {item.name || item.username || "-"}
+                      </div>
+                      {item.username && (
+                        <div className="text-xs text-slate-500">
+                          @{item.username}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {item.followers != null
+                        ? formatMan(item.followers)
+                        : "-"}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {item.avgViews != null
+                        ? formatMan(item.avgViews)
+                        : "-"}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {item.adAvgViews != null
+                        ? `${formatMan(item.adAvgViews)} (${item.adPostsSampled ?? 0}건)`
+                        : "-"}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {item.status === "updated"
+                        ? "완료"
+                        : item.status === "skipped"
+                          ? `건너뜀${item.reason ? ` · ${item.reason}` : ""}`
+                          : `실패${item.reason ? ` · ${item.reason}` : ""}`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <CampaignEmailModal
         open={emailModalOpen}
