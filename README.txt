@@ -1,32 +1,114 @@
-Google OAuth NEXT_PRERENDER_INTERRUPTED - cookie snapshot fix
+캠페인 선택 인플루언서 Apify 데이터 최신화 기능
 
-이 버전은 이전 await connection() 패치보다 한 단계 더 강하게 처리합니다.
+추가/교체 파일
+1. components/campaign-influencer-manager.tsx
+2. app/api/influencers/refresh-stats/route.ts
+3. supabase/migrations/20261117_add_channel_refresh_stats.sql
 
-변경점
-1. OAuth GET handler 시작부의 await connection() 유지
-2. 그 직후 request.headers.get("cookie")를 딱 한 번 읽음
-3. Cookie 헤더를 일반 {name, value}[] 배열로 변환
-4. Supabase SSR client는 NextRequest.cookies가 아니라 이 스냅샷만 사용
+기능
+- 캠페인에서 체크한 인플루언서만 최신화
+- 현재 1차 버전은 Instagram 대상
+- 선택 인원 계정을 한 번의 Apify Actor 실행으로 배치 처리
+- 기존 Apify Instagram Profile Scraper 사용
+  기본 Actor:
+  dami_studio~instagram-profile-scraper
+- 갱신 항목:
+  followers
+  avg_views
+  ad_avg_views
+  ad_posts_sampled
+  stats_updated_at
+  stats_source
+- 광고성 게시물:
+  #광고, #협찬, #유료광고, 제품제공, paid partnership,
+  sponsored, #ad 등의 표기 또는 sponsored/paid-partnership 플래그
+- 광고 평균 조회수:
+  최신 광고성 게시물 중 조회수가 확인되는 최대 3개 평균
+- 일반 평균 조회수:
+  최신 게시물 중 조회수가 확인되는 최대 10개 평균
+- 이미지처럼 조회수 값이 없는 게시물은 조회수 평균 계산에서 제외
 
-따라서 Supabase auth.getUser() 내부에서 나중에 request.cookies.getAll()을
-호출하면서 NEXT_PRERENDER_INTERRUPTED가 발생하는 경로를 제거합니다.
+Apify API Key
+권장:
+Vercel Environment Variables에 아래를 추가
+APIFY_API_TOKEN=apify_api_...
 
-교체 파일
-- lib/supabase/route-client.ts
-- app/api/google/oauth/start/route.ts
-- app/api/google/oauth/callback/route.ts
+선택:
+APIFY_INSTAGRAM_PROFILE_ACTOR_ID=dami_studio~instagram-profile-scraper
 
-중요
-- 세 파일을 모두 같이 교체하세요.
-- export const dynamic = "force-dynamic"은 추가하지 않습니다.
-- cacheComponents 설정은 그대로 유지합니다.
-- app/api/influencers/refresh-stats/route.ts는 기존
-  createRouteSupabaseClient(request) 호출을 계속 사용할 수 있습니다.
-  POST handler는 prerender 대상이 아닙니다.
+APIFY_API_TOKEN이 서버에 없으면
+'데이터 최신화' 클릭 시 브라우저 prompt로 1회 입력받습니다.
+입력된 키는 DB에 저장하지 않습니다.
 
-적용 후
-npm run build
+DB 적용 순서
+1. Supabase SQL Editor에서
+   supabase/migrations/20261117_add_channel_refresh_stats.sql 실행
+2. 파일 교체/추가
+3. Vercel 환경변수 APIFY_API_TOKEN 설정 권장
+4. 재배포
 
-확인할 것
-- lib/supabase/route-client.ts 로그에서 request.cookies.getAll()이 더 이상 나오지 않아야 함
-- NEXT_PRERENDER_INTERRUPTED가 OAuth 경로에서 사라져야 함
+UI
+캠페인 인플루언서 체크
+→ '선택 N명 데이터 최신화'
+→ Apify batch 실행
+→ DB 갱신
+→ 성공/건너뜀/실패 및 최신 수치 표 표시
+
+기존 기능 보존
+- 체크박스 선택
+- 후보/확정 분리
+- 페이지네이션
+- 일괄 진행상태 변경
+- Gmail 메일
+- 캠페인 제거
+- DB에서 인플루언서 추가
+
+주의
+- 현재 YouTube/Naver Blog는 건드리지 않음
+- Instagram 계정이 없는 선택 항목은 건너뜀
+- 한 요청 최대 100명
+- influencer_channels에 Instagram 채널이 없고 legacy instagram_id만 있으면
+  Instagram channel row를 자동 생성함
+- legacy influencers.followers/avg_views는 해당 Instagram 채널이 primary일 때만 동기화함
+
+
+TypeScript build hotfix
+- request.json() 결과 타입을 명시
+- campaignInfluencerIds를 string[]로 명시
+- Set<string>으로 고정
+- TS2345 / TS2322 unknown -> string 오류 수정
+
+
+============================================================
+NEXT_PRERENDER_INTERRUPTED 최종 공용 수정
+============================================================
+
+원인:
+기존 createRouteSupabaseClient(request)가 동기 함수였고,
+함수 내부에서 바로 request.headers.get("cookie")를 읽었습니다.
+따라서 cacheComponents의 build-time prerender 중 호출되면
+NEXT_PRERENDER_INTERRUPTED가 발생했습니다.
+
+이번 수정:
+lib/supabase/route-client.ts
+- createRouteSupabaseClient를 async 함수로 변경
+- 함수 내부 첫 단계에서 await connection()
+- 그 이후에만 request.headers.get("cookie") 접근
+- cookie header는 일반 배열 snapshot으로 변환 후 Supabase에 전달
+
+사용법:
+기존:
+  const supabase = createRouteSupabaseClient(request);
+
+수정:
+  const supabase = await createRouteSupabaseClient(request);
+
+이번 ZIP에 포함된 refresh-stats route는 이미 await 형태로 수정되어 있습니다.
+
+중요:
+프로젝트 안에 createRouteSupabaseClient(request)를 사용하는 다른 Route Handler가
+추가로 있다면 모두 await createRouteSupabaseClient(request)로 바꿔야 합니다.
+TypeScript가 Promise 타입 오류로 남은 호출부를 잡아주므로 npm run build로 확인할 수 있습니다.
+
+OAuth start/callback에서 createRouteSupabaseClientFromCookieHeader를 직접 쓰는 경우는
+기존 await connection()이 GET handler 상단에 있으면 그대로 사용 가능합니다.
