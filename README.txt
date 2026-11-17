@@ -1,79 +1,35 @@
-캠페인 선택 인플루언서 Apify 데이터 최신화 기능
+Google OAuth NEXT_PRERENDER_INTERRUPTED 재적용 패치
 
-추가/교체 파일
-1. components/campaign-influencer-manager.tsx
-2. app/api/influencers/refresh-stats/route.ts
-3. supabase/migrations/20261117_add_channel_refresh_stats.sql
+현재 오류:
+lib/supabase/route-client.ts
+request.cookies.getAll()
+digest: NEXT_PRERENDER_INTERRUPTED
 
-기능
-- 캠페인에서 체크한 인플루언서만 최신화
-- 현재 1차 버전은 Instagram 대상
-- 선택 인원 계정을 한 번의 Apify Actor 실행으로 배치 처리
-- 기존 Apify Instagram Profile Scraper 사용
-  기본 Actor:
-  dami_studio~instagram-profile-scraper
-- 갱신 항목:
-  followers
-  avg_views
-  ad_avg_views
-  ad_posts_sampled
-  stats_updated_at
-  stats_source
-- 광고성 게시물:
-  #광고, #협찬, #유료광고, 제품제공, paid partnership,
-  sponsored, #ad 등의 표기 또는 sponsored/paid-partnership 플래그
-- 광고 평균 조회수:
-  최신 광고성 게시물 중 조회수가 확인되는 최대 3개 평균
-- 일반 평균 조회수:
-  최신 게시물 중 조회수가 확인되는 최대 10개 평균
-- 이미지처럼 조회수 값이 없는 게시물은 조회수 평균 계산에서 제외
+원인:
+cacheComponents가 켜진 Next.js 빌드에서
+Google OAuth GET Route Handler가 prerender 대상으로 평가되면서
+실제 요청 객체의 cookies를 build-time에 읽으려 한 문제입니다.
 
-Apify API Key
-권장:
-Vercel Environment Variables에 아래를 추가
-APIFY_API_TOKEN=apify_api_...
+필수 교체 파일:
+1. app/api/google/oauth/start/route.ts
+2. app/api/google/oauth/callback/route.ts
 
-선택:
-APIFY_INSTAGRAM_PROFILE_ACTOR_ID=dami_studio~instagram-profile-scraper
+두 GET handler는 request.cookies / request.nextUrl 등을 읽기 전에:
+  await connection();
 
-APIFY_API_TOKEN이 서버에 없으면
-'데이터 최신화' 클릭 시 브라우저 prompt로 1회 입력받습니다.
-입력된 키는 DB에 저장하지 않습니다.
+을 실행합니다.
 
-DB 적용 순서
-1. Supabase SQL Editor에서
-   supabase/migrations/20261117_add_channel_refresh_stats.sql 실행
-2. 파일 교체/추가
-3. Vercel 환경변수 APIFY_API_TOKEN 설정 권장
-4. 재배포
+lib/supabase/route-client.ts는 현재 request.cookies 기반 구조를 유지합니다.
+next/headers의 cookies()로 되돌리지 마세요.
 
-UI
-캠페인 인플루언서 체크
-→ '선택 N명 데이터 최신화'
-→ Apify batch 실행
-→ DB 갱신
-→ 성공/건너뜀/실패 및 최신 수치 표 표시
+적용 순서:
+1. 위 두 route.ts 파일을 프로젝트의 동일 경로에 덮어쓰기
+2. 기존 lib/supabase/route-client.ts는 이 ZIP 버전과 다르면 같이 교체
+3. git add / commit / push
+4. Vercel에서 새 배포
+5. 빌드 로그에서 NEXT_PRERENDER_INTERRUPTED가 사라지는지 확인
 
-기존 기능 보존
-- 체크박스 선택
-- 후보/확정 분리
-- 페이지네이션
-- 일괄 진행상태 변경
-- Gmail 메일
-- 캠페인 제거
-- DB에서 인플루언서 추가
-
-주의
-- 현재 YouTube/Naver Blog는 건드리지 않음
-- Instagram 계정이 없는 선택 항목은 건너뜀
-- 한 요청 최대 100명
-- influencer_channels에 Instagram 채널이 없고 legacy instagram_id만 있으면
-  Instagram channel row를 자동 생성함
-- legacy influencers.followers/avg_views는 해당 Instagram 채널이 primary일 때만 동기화함
-
-
-TypeScript build hotfix
-- request.json() 결과 타입을 명시
-- campaignInfluencerIds를 string[]로 명시
-- Set<string>으로 고정
-- TS2345 / TS2322 unknown -> string 오류 수정
+주의:
+- export const dynamic = "force-dynamic" 같은 route segment config는
+  현재 프로젝트의 cacheComponents 설정과 충돌할 수 있으므로 사용하지 않습니다.
+- Apify refresh-stats POST route와는 무관한 오류입니다.
