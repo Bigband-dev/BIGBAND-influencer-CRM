@@ -1423,6 +1423,96 @@ export default function ExcelImport() {
         ])
       );
 
+      /*
+       * 되돌리기를 위해 업로드 전에 기존 인플루언서의 전체 채널 상태를
+       * 스냅샷으로 저장합니다.
+       * matching handle만이 아니라 해당 influencer의 모든 채널을 저장해야
+       * is_primary 변경까지 정확히 복원할 수 있습니다.
+       */
+      const beforeChannels: any[] = [];
+
+      for (const idChunk of chunkArray(
+        existingInfluencerIds,
+        200
+      )) {
+        const { data, error } = await supabase
+          .from("influencer_channels")
+          .select(
+            "id, influencer_id, platform, channel_name, handle, url, followers, avg_views, collaboration_rate, is_primary, memo"
+          )
+          .in("influencer_id", idChunk);
+
+        if (error) {
+          throw new Error(
+            `되돌리기용 기존 채널 조회 실패: ${error.message}`
+          );
+        }
+
+        beforeChannels.push(...(data ?? []));
+      }
+
+      const beforeChannelIds = Array.from(
+        new Set(
+          beforeChannels
+            .map((channel) => channel.id)
+            .filter(Boolean)
+        )
+      );
+
+      const beforeRates: any[] = [];
+
+      for (const channelIdChunk of chunkArray(
+        beforeChannelIds,
+        200
+      )) {
+        const { data, error } = await supabase
+          .from("influencer_channel_rates")
+          .select("channel_id, content_type, rate")
+          .in("channel_id", channelIdChunk);
+
+        if (error) {
+          throw new Error(
+            `되돌리기용 기존 채널 단가 조회 실패: ${error.message}`
+          );
+        }
+
+        beforeRates.push(...(data ?? []));
+      }
+
+      const beforeChannelsByInfluencer = new Map<
+        string,
+        any[]
+      >();
+
+      for (const channel of beforeChannels) {
+        const current =
+          beforeChannelsByInfluencer.get(
+            channel.influencer_id
+          ) ?? [];
+        current.push(channel);
+        beforeChannelsByInfluencer.set(
+          channel.influencer_id,
+          current
+        );
+      }
+
+      const beforeRatesByChannel = new Map<
+        string,
+        any[]
+      >();
+
+      for (const rate of beforeRates) {
+        const current =
+          beforeRatesByChannel.get(
+            rate.channel_id
+          ) ?? [];
+        current.push(rate);
+        beforeRatesByChannel.set(
+          rate.channel_id,
+          current
+        );
+      }
+
       const personIdMap = new Map<string, string>();
       const insertedInfluencerIds = new Set<string>();
       const beforeInfluencerMap = new Map<
@@ -1593,6 +1683,9 @@ export default function ExcelImport() {
        * 채널도 ID를 미리 지정한 뒤 bulk upsert 합니다.
        * 기존 코드의 채널별 update/insert 반복을 제거했습니다.
        */
+      const createdChannelIdsByInfluencer =
+        new Map<string, string[]>();
+
       const uniqueChannelMap = new Map<
         string,
         {
@@ -1627,6 +1720,18 @@ export default function ExcelImport() {
         const channelId =
           existingChannel?.id ??
           crypto.randomUUID();
+
+        if (!existingChannel?.id) {
+          const current =
+            createdChannelIdsByInfluencer.get(
+              influencerId
+            ) ?? [];
+          current.push(channelId);
+          createdChannelIdsByInfluencer.set(
+            influencerId,
+            current
+          );
+        }
 
         uniqueChannelMap.set(
           `${influencerId}::${row.platform}`,
@@ -2260,6 +2365,30 @@ export default function ExcelImport() {
                 index === 0
                   ? createdCampaignIds
                   : [],
+              created_channel_ids:
+                influencerId
+                  ? createdChannelIdsByInfluencer.get(
+                      influencerId
+                    ) ?? []
+                  : [],
+              before_channels:
+                influencerId
+                  ? beforeChannelsByInfluencer.get(
+                      influencerId
+                    ) ?? []
+                  : [],
+              before_rates:
+                influencerId
+                  ? (
+                      beforeChannelsByInfluencer.get(
+                        influencerId
+                      ) ?? []
+                    ).flatMap((channel) =>
+                      beforeRatesByChannel.get(
+                        channel.id
+                      ) ?? []
+                    )
+                  : [],
             },
           },
         };
@@ -2371,7 +2500,7 @@ export default function ExcelImport() {
     }
 
     const confirmed = window.confirm(
-      `${batch.file_name} 업로드를 되돌리시겠습니까?\n\n신규 등록된 인플루언서는 삭제되고, 기존 인플루언서는 업로드 이전 값으로 복원됩니다.\n\n캠페인에 연결된 신규 인플루언서가 있다면 관련 데이터에도 영향을 줄 수 있습니다.`
+      `${batch.file_name} 업로드를 되돌리시겠습니까?\n\n신규 등록된 인플루언서와 이번 업로드에서 새로 추가된 채널은 삭제되고, 기존 인플루언서의 기본정보·카테고리·채널·대표채널·단가가 업로드 이전 값으로 복원됩니다.\n\n이번 업로드에서 새로 생성된 캠페인 연결도 함께 정리됩니다.`
     );
 
     if (!confirmed) return;
@@ -2533,13 +2662,171 @@ export default function ExcelImport() {
         }
       }
 
-      // 기존 인플루언서는 업로드 직전 값으로 복원
+      /*
+       * 기존 인플루언서는 채널/단가/대표채널 상태까지 업로드 직전으로 복원합니다.
+       *
+       * 순서:
+       * 1) 이번 업로드에서 새로 만든 채널 삭제
+       * 2) 기존 채널에 현재 남아 있는 단가 삭제
+       * 3) 기존 채널 스냅샷 upsert (is_primary 포함)
+       * 4) 기존 단가 스냅샷 복원
+       * 5) influencer 본체 복원
+       */
       for (const item of updatedItems) {
         if (
           !item.influencer_id ||
           !item.before_data
         ) {
           continue;
+        }
+
+        const meta = (
+          item.imported_data as {
+            __import_meta?: {
+              created_channel_ids?: string[];
+              before_channels?: Array<
+                Record<string, any>
+              >;
+              before_rates?: Array<
+                Record<string, any>
+              >;
+            };
+          } | null
+        )?.__import_meta;
+
+        const createdChannelIds =
+          Array.from(
+            new Set(
+              meta?.created_channel_ids ?? []
+            )
+          );
+
+        const beforeChannelRows =
+          (meta?.before_channels ?? []).filter(
+            (channel) =>
+              channel?.id &&
+              channel?.influencer_id ===
+                item.influencer_id
+          );
+
+        const beforeRateRows =
+          (meta?.before_rates ?? []).filter(
+            (rate) =>
+              rate?.channel_id &&
+              rate?.content_type
+          );
+
+        /*
+         * 새로 추가된 플랫폼 채널을 먼저 제거합니다.
+         * FK에 cascade가 걸려 있다면 단가도 함께 제거되며,
+         * 그렇지 않은 환경을 위해 단가를 명시적으로 먼저 삭제합니다.
+         */
+        if (createdChannelIds.length > 0) {
+          for (const idChunk of chunkArray(
+            createdChannelIds,
+            200
+          )) {
+            const { error: createdRateDeleteError } =
+              await supabase
+                .from("influencer_channel_rates")
+                .delete()
+                .in("channel_id", idChunk);
+
+            if (createdRateDeleteError) {
+              throw new Error(
+                `신규 채널 단가 되돌리기 실패: ${createdRateDeleteError.message}`
+              );
+            }
+
+            const { error: createdChannelDeleteError } =
+              await supabase
+                .from("influencer_channels")
+                .delete()
+                .in("id", idChunk)
+                .eq(
+                  "influencer_id",
+                  item.influencer_id
+                );
+
+            if (createdChannelDeleteError) {
+              throw new Error(
+                `신규 채널 되돌리기 실패: ${createdChannelDeleteError.message}`
+              );
+            }
+          }
+        }
+
+        const existingBeforeChannelIds =
+          Array.from(
+            new Set(
+              beforeChannelRows
+                .map((channel) =>
+                  String(channel.id)
+                )
+                .filter(Boolean)
+            )
+          );
+
+        /*
+         * 업로드 중 기존 채널에 새 content_type 단가가 추가됐을 수도 있으므로
+         * 해당 기존 채널의 현재 단가를 모두 비운 뒤 스냅샷을 다시 넣습니다.
+         */
+        for (const idChunk of chunkArray(
+          existingBeforeChannelIds,
+          200
+        )) {
+          const { error: rateClearError } =
+            await supabase
+              .from("influencer_channel_rates")
+              .delete()
+              .in("channel_id", idChunk);
+
+          if (rateClearError) {
+            throw new Error(
+              `기존 채널 단가 초기화 실패: ${rateClearError.message}`
+            );
+          }
+        }
+
+        if (beforeChannelRows.length > 0) {
+          for (const channelChunk of chunkArray(
+            beforeChannelRows,
+            200
+          )) {
+            const { error: channelRestoreError } =
+              await supabase
+                .from("influencer_channels")
+                .upsert(channelChunk, {
+                  onConflict: "id",
+                });
+
+            if (channelRestoreError) {
+              throw new Error(
+                `기존 채널 복원 실패: ${channelRestoreError.message}`
+              );
+            }
+          }
+        }
+
+        if (beforeRateRows.length > 0) {
+          for (const rateChunk of chunkArray(
+            beforeRateRows,
+            300
+          )) {
+            const { error: rateRestoreError } =
+              await supabase
+                .from("influencer_channel_rates")
+                .upsert(rateChunk, {
+                  onConflict:
+                    "channel_id,content_type",
+                });
+
+            if (rateRestoreError) {
+              throw new Error(
+                `기존 채널 단가 복원 실패: ${rateRestoreError.message}`
+              );
+            }
+          }
         }
 
         const restoreData = {
@@ -2641,7 +2928,7 @@ export default function ExcelImport() {
       }
 
       setMessage(
-        `${batch.file_name} 업로드를 되돌렸습니다. 신규 ${insertedItems.length.toLocaleString()}명 삭제, 기존 ${updatedItems.length.toLocaleString()}명 복원을 시도했습니다.`
+        `${batch.file_name} 업로드를 되돌렸습니다. 신규 ${insertedItems.length.toLocaleString()}명 삭제, 기존 ${updatedItems.length.toLocaleString()}명의 기본정보·채널·단가 복원을 완료했습니다.`
       );
 
       await loadImportHistory();

@@ -28,3 +28,25 @@ TypeScript build hotfix
   field === "platform" 조건을 제거했습니다.
 - channel_handle의 '선택' 표시만 유지합니다.
 - TS2367 빌드 오류 해결용 수정입니다.
+
+
+완전 되돌리기 보강
+- 업로드 전 기존 influencer의 전체 influencer_channels 스냅샷 저장
+- 업로드 전 기존 influencer_channel_rates 스냅샷 저장
+- 업로드 중 신규 생성된 channel ID 저장
+- 되돌리기 시:
+  1. 신규 campaign_influencers 연결 제거
+  2. 이번 업로드에서 추가된 신규 channel/rate 삭제
+  3. 기존 channel 전체 상태 복원 (followers, avg_views, is_primary 포함)
+  4. 기존 channel rate 전체 복원
+  5. influencers 본체 복원 (category/categories 포함)
+  6. 신규 influencer 삭제
+  7. 비어 있는 신규 campaign 삭제
+
+DB migration 없음.
+import_batch_items.imported_data JSON 내부 __import_meta에 스냅샷을 저장합니다.
+
+주의:
+- 이 수정본을 적용한 이후 생성된 업로드 배치부터 채널/단가 완전 되돌리기가 가능합니다.
+- 과거 배치는 before_channels / before_rates / created_channel_ids 메타데이터가 없으므로,
+  과거 배치의 채널/단가까지 소급 복원할 수는 없습니다.
