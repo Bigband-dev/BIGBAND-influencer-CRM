@@ -1,22 +1,15 @@
-Google OAuth GET Route Handler prerender fix
+메일 미리보기 선택사항 변경
 
-문제:
-- cacheComponents 환경에서 GET Route Handler가 build-time prerender를 시도함
-- createRouteSupabaseClient() 내부 request.cookies.getAll() 접근 시
-  NEXT_PRERENDER_INTERRUPTED 발생
+변경 내용
+- 미리보기를 전부 확인하지 않아도 발송 가능
+- 미리보기 자체를 생성하지 않아도 발송 가능
+- 미리보기 확인 수는 참고용으로만 표시
+- 일반 대량메일 작성 화면에 '바로 발송' 버튼 추가
+- 캠페인 메일 하단 발송 버튼은 미리보기 확인 여부와 무관하게 활성화
+- 수신자 없음 / 제목 없음 / 본문 없음 / 발송 중 상태는 기존처럼 차단
 
-수정:
-- app/api/google/oauth/start/route.ts
-- app/api/google/oauth/callback/route.ts
+교체 파일
+- components/general-bulk-mail.tsx
+- components/campaign-email-modal.tsx
 
-두 GET handler 시작부에:
-  await connection();
-
-추가하고 next/server에서 connection을 import함.
-
-route-client.ts는 변경하지 않음.
-
-Next.js 공식 권장 패턴:
-GET Route Handler에서 request.url / request.headers / request.cookies 등
-Request 정보를 읽기 전에 await connection()을 호출하면 이후 코드는
-runtime request에서만 실행됨.
+백엔드 / DB 수정 없음.

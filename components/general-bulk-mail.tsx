@@ -649,17 +649,13 @@ export default function GeneralBulkMail() {
       return;
     }
 
-    if (!previewItems.length) {
-      alert(
-        "먼저 메일 미리보기를 생성해주세요."
-      );
+    if (!subject.trim()) {
+      alert("메일 제목을 입력해주세요.");
       return;
     }
 
-    if (!allPreviewsReviewed) {
-      alert(
-        `전체 미리보기를 확인해주세요. (${reviewedPreviewEmails.size}/${previewItems.length})`
-      );
+    if (!body.trim()) {
+      alert("메일 본문을 입력해주세요.");
       return;
     }
 
@@ -805,25 +801,39 @@ export default function GeneralBulkMail() {
               </strong>
             </div>
 
-            <button
-              type="button"
-              onClick={
-                requestPreview
-              }
-              disabled={
-                previewing ||
-                sending ||
-                toRecipients.length ===
-                  0
-              }
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-            >
-              {previewing
-                ? "미리보기 생성 중..."
-                : preview
-                  ? "미리보기 다시 생성"
-                  : "미리보기"}
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={requestPreview}
+                disabled={
+                  previewing ||
+                  sending ||
+                  toRecipients.length === 0
+                }
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              >
+                {previewing
+                  ? "미리보기 생성 중..."
+                  : preview
+                    ? "미리보기 다시 생성"
+                    : "미리보기"}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={
+                  sending ||
+                  previewing ||
+                  toRecipients.length === 0
+                }
+                className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {sending
+                  ? "메일 발송 중..."
+                  : `${toRecipients.length}명에게 바로 발송`}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -949,25 +959,19 @@ export default function GeneralBulkMail() {
               className={
                 allPreviewsReviewed
                   ? "mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
-                  : "mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+                  : "mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800"
               }
             >
               {allPreviewsReviewed
                 ? "모든 수신자의 미리보기를 확인했습니다."
-                : `아직 ${
-                    previewItems.length -
-                    reviewedPreviewEmails.size
-                  }명의 미리보기를 확인해야 합니다.`}
+                : `현재 ${reviewedPreviewEmails.size}/${previewItems.length}명의 미리보기를 확인했습니다. 나머지를 확인하지 않아도 바로 발송할 수 있습니다.`}
             </div>
 
             <div className="mt-5 flex justify-end">
               <button
                 type="button"
                 onClick={handleSend}
-                disabled={
-                  sending ||
-                  !allPreviewsReviewed
-                }
+                disabled={sending}
                 className="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {sending

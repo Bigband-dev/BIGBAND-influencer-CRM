@@ -757,20 +757,6 @@ export default function CampaignEmailModal({
       return;
     }
 
-    if (!previewItems.length) {
-      alert("먼저 메일 미리보기를 생성해주세요.");
-      setActiveTab("preview");
-      return;
-    }
-
-    if (!allPreviewsReviewed) {
-      alert(
-        `전체 미리보기를 확인해주세요. (${reviewedPreviewEmails.size}/${previewItems.length})`
-      );
-      setActiveTab("preview");
-      return;
-    }
-
     if (!subject.trim()) {
       alert("메일 제목을 입력해주세요.");
       return;
@@ -1231,12 +1217,12 @@ export default function CampaignEmailModal({
                     className={
                       allPreviewsReviewed
                         ? "rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
-                        : "rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+                        : "rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800"
                     }
                   >
                     {allPreviewsReviewed
-                      ? `전체 ${previewItems.length}명의 메일 미리보기를 확인했습니다. 이제 발송할 수 있습니다.`
-                      : `아직 ${previewItems.length - reviewedPreviewEmails.size}명의 미리보기를 확인해야 합니다. 이전/다음 버튼으로 전부 확인해주세요.`}
+                      ? `전체 ${previewItems.length}명의 메일 미리보기를 확인했습니다.`
+                      : `현재 ${reviewedPreviewEmails.size}/${previewItems.length}명의 미리보기를 확인했습니다. 나머지를 확인하지 않아도 발송할 수 있습니다.`}
                   </div>
                 </div>
               )}
@@ -1275,8 +1261,7 @@ export default function CampaignEmailModal({
               disabled={
                 sending ||
                 previewing ||
-                mailableCount === 0 ||
-                !allPreviewsReviewed
+                mailableCount === 0
               }
               className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
