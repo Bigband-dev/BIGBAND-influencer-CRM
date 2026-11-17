@@ -1,3 +1,4 @@
+import { connection } from "next/server";
 import { NextRequest, NextResponse } from "next/server";
 
 import { getGoogleAuthUrl } from "@/lib/google/oauth";
@@ -14,6 +15,10 @@ function sanitizeReturnTo(value: string | null) {
 }
 
 export async function GET(request: NextRequest) {
+  // cacheComponents 환경에서 GET Route Handler가 build-time prerender에
+  // 들어가지 않도록 실제 요청 시점까지 실행을 지연합니다.
+  await connection();
+
   try {
     // next/headers의 cookies()를 사용하지 않고 요청 쿠키를 직접 읽습니다.
     const supabase = createRouteSupabaseClient(request);

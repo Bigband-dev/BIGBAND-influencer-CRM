@@ -1,4 +1,5 @@
 import { google } from "googleapis";
+import { connection } from "next/server";
 import { NextRequest, NextResponse } from "next/server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -16,6 +17,10 @@ function sanitizeReturnTo(value: string | null) {
 }
 
 export async function GET(request: NextRequest) {
+  // cacheComponents 환경에서 GET Route Handler가 build-time prerender에
+  // 들어가지 않도록 실제 요청 시점까지 실행을 지연합니다.
+  await connection();
+
   try {
     const code = request.nextUrl.searchParams.get("code");
     const oauthError = request.nextUrl.searchParams.get("error");
