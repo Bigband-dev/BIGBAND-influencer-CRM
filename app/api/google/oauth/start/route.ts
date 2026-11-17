@@ -2,7 +2,7 @@ import { connection } from "next/server";
 import { NextRequest, NextResponse } from "next/server";
 
 import { getGoogleAuthUrl } from "@/lib/google/oauth";
-import { createRouteSupabaseClient } from "@/lib/supabase/route-client";
+import { createRouteSupabaseClientFromCookieHeader } from "@/lib/supabase/route-client";
 
 function sanitizeReturnTo(value: string | null) {
   if (!value) return "/account";
@@ -21,7 +21,13 @@ export async function GET(request: NextRequest) {
 
   try {
     // next/headers의 cookies()를 사용하지 않고 요청 쿠키를 직접 읽습니다.
-    const supabase = createRouteSupabaseClient(request);
+    const cookieHeader =
+      request.headers.get("cookie");
+
+    const supabase =
+      createRouteSupabaseClientFromCookieHeader(
+        cookieHeader
+      );
 
     const {
       data: { user },

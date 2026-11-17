@@ -15,20 +15,77 @@ function getSupabasePublicKey() {
   return key;
 }
 
+type CookieSnapshot = {
+  name: string;
+  value: string;
+};
+
+export function parseCookieHeader(
+  cookieHeader: string | null
+): CookieSnapshot[] {
+  if (!cookieHeader?.trim()) {
+    return [];
+  }
+
+  return cookieHeader
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const separatorIndex = part.indexOf("=");
+
+      if (separatorIndex < 0) {
+        return {
+          name: part,
+          value: "",
+        };
+      }
+
+      const name = part
+        .slice(0, separatorIndex)
+        .trim();
+
+      const rawValue = part
+        .slice(separatorIndex + 1)
+        .trim();
+
+      let value = rawValue;
+
+      try {
+        value = decodeURIComponent(rawValue);
+      } catch {
+        // 이미 일반 문자열이면 그대로 사용합니다.
+      }
+
+      return {
+        name,
+        value,
+      };
+    })
+    .filter((cookie) => cookie.name.length > 0);
+}
+
 /**
- * Route Handler 전용 Supabase client.
+ * OAuth GET Route Handler용.
  *
- * cacheComponents 환경에서 next/headers의 cookies()를 호출하지 않고
- * NextRequest에 이미 포함된 쿠키를 직접 사용합니다.
- *
- * OAuth start/callback에서는 세션 조회만 필요하므로 setAll은 비워둡니다.
+ * await connection() 이후 request.headers에서 Cookie 헤더를 한 번 읽고
+ * 이 함수에는 일반 문자열만 전달합니다.
+ * Supabase 내부에서 NextRequest.cookies를 나중에 다시 읽지 않도록 하는 것이 핵심입니다.
  */
-export function createRouteSupabaseClient(request: NextRequest) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+export function createRouteSupabaseClientFromCookieHeader(
+  cookieHeader: string | null
+) {
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
 
   if (!supabaseUrl) {
-    throw new Error("NEXT_PUBLIC_SUPABASE_URL이 설정되지 않았습니다.");
+    throw new Error(
+      "NEXT_PUBLIC_SUPABASE_URL이 설정되지 않았습니다."
+    );
   }
+
+  const cookieSnapshot =
+    parseCookieHeader(cookieHeader);
 
   return createServerClient(
     supabaseUrl,
@@ -36,13 +93,26 @@ export function createRouteSupabaseClient(request: NextRequest) {
     {
       cookies: {
         getAll() {
-          return request.cookies.getAll();
+          return cookieSnapshot;
         },
         setAll() {
-          // 이 OAuth 라우트에서는 Supabase 세션을 새로 만드는 작업을 하지 않습니다.
-          // 기존 로그인 세션 확인용으로만 사용합니다.
+          // OAuth start/callback에서는 기존 로그인 세션 조회만 합니다.
         },
       },
     }
+  );
+}
+
+/**
+ * POST Route Handler 등 기존 코드 호환용.
+ *
+ * GET Route Handler에서는 이 함수를 직접 쓰지 말고
+ * await connection() 후 createRouteSupabaseClientFromCookieHeader()를 사용하세요.
+ */
+export function createRouteSupabaseClient(
+  request: NextRequest
+) {
+  return createRouteSupabaseClientFromCookieHeader(
+    request.headers.get("cookie")
   );
 }

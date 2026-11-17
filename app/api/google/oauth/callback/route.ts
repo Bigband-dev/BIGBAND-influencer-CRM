@@ -3,7 +3,7 @@ import { connection } from "next/server";
 import { NextRequest, NextResponse } from "next/server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createRouteSupabaseClient } from "@/lib/supabase/route-client";
+import { createRouteSupabaseClientFromCookieHeader } from "@/lib/supabase/route-client";
 import { createGoogleOAuthClient } from "@/lib/google/oauth";
 
 function sanitizeReturnTo(value: string | null) {
@@ -40,7 +40,13 @@ export async function GET(request: NextRequest) {
     }
 
     // next/headers의 cookies() 대신 request.cookies 사용
-    const supabase = createRouteSupabaseClient(request);
+    const cookieHeader =
+      request.headers.get("cookie");
+
+    const supabase =
+      createRouteSupabaseClientFromCookieHeader(
+        cookieHeader
+      );
 
     const {
       data: { user },
