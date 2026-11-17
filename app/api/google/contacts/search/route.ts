@@ -202,7 +202,7 @@ async function loadPersonalContacts(
 export async function GET(request: NextRequest) {
   try {
     const supabase =
-      createRouteSupabaseClient(request);
+      await createRouteSupabaseClient(request);
 
     const {
       data: { user },

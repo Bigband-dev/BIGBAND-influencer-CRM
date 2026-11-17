@@ -128,7 +128,7 @@ export async function POST(
 ) {
   try {
     const supabase =
-      createRouteSupabaseClient(
+      await createRouteSupabaseClient(
         request
       );
 
