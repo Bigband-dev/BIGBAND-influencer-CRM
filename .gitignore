@@ -33,6 +33,8 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*.local
 .env
+.env.*
+
 
 # vercel
 .vercel
@@ -42,3 +44,10 @@ yarn-error.log*
 next-env.d.ts
 
 .vercel
+*.sql
+*.dump
+*.tar.gz
+*.tar.gz.enc
+*.json.key
+service-account*.json
+!*.example
