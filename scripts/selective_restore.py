@@ -174,14 +174,25 @@ def load_tables(path):
                 tables[current].append(row)
                 continue
             match = COPY_HEAD.fullmatch(line)
+
+            match = COPY_HEAD.fullmatch(line)
+            
             if match:
                 table_name = match.group(1) or match.group(2)
-
+            
                 if table_name in ALLOWED:
                     current = table_name
-                    cols = [c.strip().strip('"') for c in match.group(3).split(',')]
-                if len(cols) != len(set(cols)) or 'id' not in cols:
-                    raise ValueError('Invalid COPY columns for ' + current)
+            
+                    cols = [
+                        c.strip().strip('"')
+                        for c in match.group(3).split(',')
+                    ]
+            
+                    if len(cols) != len(set(cols)) or "id" not in cols:
+                        raise ValueError(
+                            "Invalid COPY columns for " + table_name
+                        )
+
     if current:
         raise ValueError('Truncated COPY block')
     
