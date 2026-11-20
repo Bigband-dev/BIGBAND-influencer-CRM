@@ -13,14 +13,14 @@ export default async function BackupManagementPage() {
   try { backups = await listCrmBackups(); }
   catch (cause) {
     console.error("Drive listing failed:", cause instanceof Error ? cause.message : "unknown");
-    error = "백업 목록을 불러오지 못했습니다. Vercel의 Drive 서비스 계정과 폴더 권한을 확인하세요.";
+    error = "백업 목록을 불러오지 못했습니다. 관리자에게 문의해 주세요.";
   }
   return (
     <div className="mx-auto max-w-6xl px-8 py-8">
-      <h1 className="text-3xl font-bold">백업 관리 · 선택 복원</h1>
-      <p className="mt-2 text-slate-600">백업을 선택하고, 삭제된 항목을 확인한 다음 소유자 승인으로 복원합니다.</p>
+      <h1 className="text-3xl font-bold">백업 관리</h1>
+      <p className="mt-2 text-slate-600">날짜를 선택해 백업 내용을 확인하고, 필요한 항목을 복구할 수 있습니다.</p>
       <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-        기존 레코드는 덮어쓰지 않습니다. 실수로 삭제된 인플루언서·캠페인 복구에만 사용하세요. 백업 시점 이후 변경사항을 되돌리는 기능은 아닙니다.
+        삭제된 인플루언서나 캠페인을 다시 가져올 때 사용합니다. 현재 목록에 있는 항목은 변경되지 않습니다.
       </p>
       {error ? <p role="alert" className="mt-5 text-red-700">{error}</p> : <BackupsClient backups={backups} canApply={isOwner(profile?.role)} />}
     </div>
