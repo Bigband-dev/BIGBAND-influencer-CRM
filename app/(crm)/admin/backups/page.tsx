@@ -4,8 +4,6 @@ import { isAdmin } from "@/lib/auth/roles";
 import { listCrmBackups } from "@/lib/backup/drive";
 import BackupsClient from "./backups-client";
 
-export const dynamic = "force-dynamic";
-
 export default async function BackupManagementPage() {
   const { user, profile } = await getActiveUser();
   if (!user) redirect("/login");

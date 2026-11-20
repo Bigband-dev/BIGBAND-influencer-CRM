@@ -3,8 +3,6 @@ import { getActiveUser } from "@/lib/auth/require-active-user";
 import { isAdmin } from "@/lib/auth/roles";
 import { listCrmBackups } from "@/lib/backup/drive";
 
-export const runtime = "nodejs";
-
 export async function POST(request: NextRequest) {
   const { user, profile } = await getActiveUser();
   if (!user) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
