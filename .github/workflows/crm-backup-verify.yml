@@ -1,0 +1,35 @@
+name: CRM backup verification (read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      backup_id:
+        description: "Google Drive backup file ID"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crm-backup-verify
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install verification dependencies
+        run: pip install -r scripts/requirements-backup.txt
+      - name: Download encrypted backup and verify integrity
+        env:
+          BACKUP_FILE_ID: ${{ inputs.backup_id }}
+          GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          BACKUP_ENCRYPTION_KEY_B64: ${{ secrets.BACKUP_ENCRYPTION_KEY_B64 }}
+        run: python scripts/verify_drive_backup.py
