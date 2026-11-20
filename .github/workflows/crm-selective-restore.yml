@@ -1,0 +1,41 @@
+name: CRM selective restore (owner approval required)
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: 'Server-created restore job UUID'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crm-selective-restore
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install recovery dependencies
+        run: |
+          pip install -r scripts/requirements-backup.txt
+          pip install 'psycopg[binary]>=3.2,<4'
+      - name: Preview or apply owner-approved missing rows
+        env:
+          RESTORE_JOB_ID: ${{ inputs.job_id }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.CRM_RESTORE_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.CRM_RESTORE_SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          BACKUP_ENCRYPTION_KEY_B64: ${{ secrets.BACKUP_ENCRYPTION_KEY_B64 }}
+          CRM_RESTORE_APPLY_ENABLED: ${{ secrets.CRM_RESTORE_APPLY_ENABLED }}
+        run: python scripts/selective_restore.py
