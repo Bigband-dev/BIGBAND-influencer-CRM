@@ -167,6 +167,16 @@ export default function Sidebar({
               >
                 이름 변경 요청
               </Link>
+              <Link
+                href="/admin/backups"
+                className={`block rounded-lg px-3 py-2.5 text-sm font-medium ${
+                  pathname.startsWith("/admin/backups")
+                    ? "bg-slate-700 text-white"
+                    : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                }`}
+              >
+                백업 관리
+              </Link>
             </nav>
           </div>
         )}
