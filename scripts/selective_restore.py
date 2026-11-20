@@ -28,7 +28,12 @@ from decrypt_backup import decrypt
 PARENTS = ('influencers', 'campaigns')
 ORDER = ('influencers', 'campaigns', 'influencer_channels', 'influencer_channel_rates', 'campaign_influencers')
 BACKUP_NAME = re.compile(r'^crm_supabase_\d{8}T\d{6}\+0900\.tar\.gz\.enc$')
-COPY_HEAD = re.compile(r'^COPY public\.([a-z_]+) \(([^)]+)\) FROM stdin;$')
+COPY_HEAD = re.compile(
+    r'^\s*COPY\s+(?:"public"|public)\.'
+    r'(?:"([a-z_][a-z0-9_]*)"|([a-z_][a-z0-9_]*))'
+    r'\s*\(([^)]+)\)\s+FROM\s+stdin\s*;\s*$',
+    re.IGNORECASE,
+)
 ALLOWED = set(ORDER)
 JOB_ID = os.environ['RESTORE_JOB_ID']
 JOB_UUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f-]{27,}$', re.I)
@@ -169,15 +174,40 @@ def load_tables(path):
                 tables[current].append(row)
                 continue
             match = COPY_HEAD.fullmatch(line)
-            if match and match.group(1) in ALLOWED:
-                current = match.group(1)
-                cols = [c.strip().strip('"') for c in match.group(2).split(',')]
+            if match:
+                table_name = match.group(1) or match.group(2)
+
+                if table_name in ALLOWED:
+                    current = table_name
+                    cols = [c.strip().strip('"') for c in match.group(3).split(',')]
                 if len(cols) != len(set(cols)) or 'id' not in cols:
                     raise ValueError('Invalid COPY columns for ' + current)
     if current:
         raise ValueError('Truncated COPY block')
+    
     if not any(tables.values()):
-        raise ValueError('No eligible public CRM table data found. Check Supabase dump format.')
+        copy_headers = []
+        insert_count = 0
+
+        with path.open("r", encoding="utf-8-sig") as f:
+            for line in f:
+                stripped = line.lstrip()
+
+                if stripped.upper().startswith("COPY "):
+                    if len(copy_headers) < 8:
+                        copy_headers.append(stripped[:200].strip())
+
+                elif stripped.upper().startswith("INSERT INTO "):
+                    insert_count += 1
+
+        print("SQL dump diagnostics:")
+        print("COPY headers:", copy_headers)
+        print("INSERT statements:", insert_count)
+
+        raise ValueError(
+            "No eligible CRM rows parsed. "
+            "Inspect SQL dump diagnostics above."
+        )
     return tables
 
 
